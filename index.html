@@ -1530,20 +1530,20 @@ document.addEventListener('keydown',e=>{
   if(e.key==='/'&&document.activeElement!==document.getElementById('sin')&&document.activeElement!==document.getElementById('emailIn')){e.preventDefault();document.getElementById('sin').focus();}
 });
 
-/* ═══ NEWSAPI STUB ═══ */
-const NEWSAPI_KEY=''; // Paste your newsapi.org key here
+/* ═══ LIVE NEWS — GNews API (free, works in production) ═══ */
+const GNEWS_KEY=''; // Get free key at gnews.io — 100 req/day, works on deployed sites
 async function fetchLive(){
-  if(!NEWSAPI_KEY)return;
+  if(!GNEWS_KEY)return;
   try{
-    const res=await fetch(`https://newsapi.org/v2/everything?q=artificial+intelligence&language=en&sortBy=publishedAt&pageSize=20&apiKey=${NEWSAPI_KEY}`);
+    const res=await fetch(`https://gnews.io/api/v4/search?q=artificial+intelligence&lang=en&sortby=publishedAt&max=20&apikey=${GNEWS_KEY}`);
     const data=await res.json();
     if(data.articles?.length){
       data.articles.forEach((a,i)=>{
-        const item={id:1000+i,cat:detectCat(a.title+' '+(a.description||'')),title:a.title,body:a.description||'',full:'<p>'+a.description+'</p>',sowhat:'Live article — analysis generating…',source:a.source?.name||'News',sourceUrl:a.url,date:new Date(a.publishedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}),verified:false,featured:false};
+        const item={id:1000+i,cat:detectCat(a.title+' '+(a.description||'')),title:a.title,body:a.description||'',full:'<p>'+(a.content||a.description||'')+'</p>',sowhat:'Live article — analysis generating…',source:a.source?.name||'News',sourceUrl:a.url,date:new Date(a.publishedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}),verified:false,featured:false};
         if(!NEWS.find(n=>n.title===item.title))NEWS.unshift(item);
       });
     }
-  }catch(e){console.warn('NewsAPI offline, using seed data.');}
+  }catch(e){console.warn('GNews offline, using seed data.');}
   renderFeed();
 }
 function detectCat(t){
@@ -1578,13 +1578,24 @@ function submitEmail(){
   }
   const btn=document.getElementById('emailBtn');
   btn.disabled=true;btn.textContent='Joining…';
-  /* Simulate API call — replace with Loops.so / Mailchimp / Supabase endpoint */
-  setTimeout(()=>{
+  /* Google Sheets endpoint via Apps Script */
+  fetch('https://script.google.com/macros/s/AKfycbwPnqP-fndHYCaIsNprsYjgXaT8mKHQxWLnQhePN9K_n6-P5EhSinShA6TN8lvOhY4IFA/exec',{
+    method:'POST',
+    mode:'no-cors',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email:email,source:'glasai-waitlist'})
+  }).then(()=>{
     document.getElementById('emailForm').style.display='none';
     document.getElementById('emailOk').classList.add('show');
     localStorage.setItem('glasai_email_captured',email);
     setTimeout(closeEmail,2200);
-  },800);
+  }).catch(()=>{
+    /* Fallback — still save locally if network fails */
+    document.getElementById('emailForm').style.display='none';
+    document.getElementById('emailOk').classList.add('show');
+    localStorage.setItem('glasai_email_captured',email);
+    setTimeout(closeEmail,2200);
+  });
 }
 document.getElementById('emailIn').addEventListener('keydown',e=>{if(e.key==='Enter')submitEmail();});
 /* Auto-show after 12s if not dismissed/captured */
