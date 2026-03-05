@@ -192,13 +192,16 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
   width:30px;height:30px;border-radius:7px;
   background:var(--glass2);border:1px solid var(--border);
   display:flex;align-items:center;justify-content:center;
-  font-size:14px;transition:all var(--t);flex-shrink:0;
+  transition:all var(--t);flex-shrink:0;color:var(--text2);
 }
+.nav-icon svg{width:15px;height:15px;display:block;}
 .nav-item.active .nav-icon{
   background:linear-gradient(135deg,rgba(79,70,229,0.28),rgba(6,182,212,0.14));
   border-color:rgba(79,70,229,0.35);
   box-shadow:0 0 10px rgba(79,70,229,0.2);
+  color:var(--indigo-l);
 }
+.nav-item:hover .nav-icon{color:var(--text);}
 .nav-label{font-size:13px;font-weight:500;flex:1;}
 .nav-chip{
   font-family:var(--fm);font-size:9px;font-weight:600;
@@ -216,6 +219,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
   text-transform:none;letter-spacing:0;
 }
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--emerald-l);display:inline-block;flex-shrink:0;animation:ping 2s ease-in-out infinite;}
 
 /* ══════════════════════════════════════
    MAIN
@@ -920,42 +924,38 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
       <div class="logo-gem">g</div>
       <div class="logo-name">glas.ai</div>
     </div>
-    <div class="logo-tag">INTELLIGENCE TERMINAL · <em>RasterBros</em></div>
+    <div class="logo-tag">AI INTELLIGENCE TERMINAL</div>
   </div>
   <div class="live-pill">
-    <div class="live-signal"><div class="live-dot"></div><span class="live-txt">Live</span></div>
+    <div class="live-signal"><div class="live-dot"></div><span class="live-txt">Live · 11 signals</span></div>
     <span class="live-time" id="lv">--:--</span>
   </div>
   <nav class="nav">
     <div class="nav-section">Platform</div>
-    <div class="nav-item active" id="nv-home" onclick="go('home',this)"><div class="nav-icon">🏠</div><div class="nav-label">Overview</div></div>
-    <div class="nav-item" id="nv-feed" onclick="go('feed',this)"><div class="nav-icon">⚡</div><div class="nav-label">Intelligence Feed</div><div class="nav-chip">LIVE</div></div>
-    <div class="nav-item" id="nv-companies" onclick="go('companies',this)"><div class="nav-icon">🏢</div><div class="nav-label">Companies</div></div>
-    <div class="nav-item" id="nv-government" onclick="go('government',this)"><div class="nav-icon">⚖️</div><div class="nav-label">Regulation</div><div class="nav-chip">7</div></div>
-    <div class="nav-item" id="nv-countries" onclick="go('countries',this)"><div class="nav-icon">🌍</div><div class="nav-label">Countries</div></div>
-    <div class="nav-item" id="nv-sources" onclick="go('sources',this)"><div class="nav-icon">✅</div><div class="nav-label">Sources</div></div>
-    <div class="nav-section" style="margin-top:6px">Business</div>
-    <div class="nav-item" id="nv-strategy" onclick="go('strategy',this)"><div class="nav-icon">🎯</div><div class="nav-label">Strategy</div></div>
-    <div class="nav-item" id="nv-pricing" onclick="go('pricing',this)"><div class="nav-icon">💎</div><div class="nav-label">Pricing & Costs</div></div>
-    <div class="nav-section" style="margin-top:6px">Growth</div>
-    <div class="nav-item" id="nv-linkedin" onclick="go('linkedin',this)"><div class="nav-icon">📣</div><div class="nav-label">LinkedIn Posts</div><div class="nav-chip">NEW</div></div>
+    <div class="nav-item active" id="nv-home" onclick="go('home',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div><div class="nav-label">Dashboard</div></div>
+    <div class="nav-item" id="nv-feed" onclick="go('feed',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><div class="nav-label">Intelligence Feed</div><div class="nav-chip">LIVE</div></div>
+    <div class="nav-item" id="nv-companies" onclick="go('companies',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M9 22V12h6v10"/><line x1="9" y1="7" x2="9" y2="7.01"/><line x1="12" y1="7" x2="12" y2="7.01"/><line x1="15" y1="7" x2="15" y2="7.01"/></svg></div><div class="nav-label">Companies</div></div>
+    <div class="nav-item" id="nv-government" onclick="go('government',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg></div><div class="nav-label">Regulation</div><div class="nav-chip">7</div></div>
+    <div class="nav-item" id="nv-countries" onclick="go('countries',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><div class="nav-label">Countries</div></div>
+    <div class="nav-item" id="nv-sources" onclick="go('sources',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></div><div class="nav-label">Sources</div></div>
+    <div class="nav-section" style="margin-top:6px">Content</div>
+    <div class="nav-item" id="nv-linkedin" onclick="go('linkedin',this)"><div class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></div><div class="nav-label">Content Toolkit</div><div class="nav-chip">NEW</div></div>
   </nav>
-  <div class="sb-foot"><div class="sb-brand">POWERED BY <strong>RasterBros</strong></div></div>
+  <div class="sb-foot"><div class="sb-brand"><span class="sb-dot"></span>DATA REFRESHED DAILY · glas.ai</div></div>
 </aside>
 
 <!-- MAIN -->
 <main class="main">
   <!-- TOPBAR -->
   <div class="topbar">
-    <button class="burger" onclick="document.getElementById('sb').classList.toggle('open')">☰</button>
-    <div class="topbar-title" id="ptitle">Platform <span>Overview</span></div>
+    <button class="burger" onclick="document.getElementById('sb').classList.toggle('open')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" width="16" height="16"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <div class="topbar-title" id="ptitle">Platform <span>Dashboard</span></div>
     <div class="search-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input class="search-in" id="sin" placeholder="Search intelligence… (press /)" oninput="doSearch(this.value)">
     </div>
     <div class="topbar-btns">
-      <button class="tb-btn primary" onclick="openEmailModal()">Early Access</button>
-      <button class="tb-btn" onclick="go('strategy',document.getElementById('nv-strategy'))">Roadmap</button>
+      <button class="tb-btn primary" onclick="openEmailModal()">Request Access</button>
     </div>
   </div>
 
@@ -968,23 +968,23 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
     <!-- ══ HOME ══ -->
     <div class="page active" id="page-home">
       <div class="hero">
-        <div class="hero-eyebrow">AI Regulatory & Company Intelligence Terminal</div>
+        <div class="hero-eyebrow">PROFESSIONAL AI INTELLIGENCE PLATFORM</div>
         <h1 class="hero-h1">Stop reading AI news.<br>Start <em>seeing the board.</em></h1>
-        <p class="hero-sub">AI regulation, model releases, funding events, and global policy — structured, verified, and analyzed for professionals who make decisions, not just scroll feeds. One terminal. Every signal that matters.</p>
+        <p class="hero-sub">Regulation, model releases, funding, and global policy — structured, verified, and curated for decision-makers. Not a feed. An intelligence terminal.</p>
         <div class="hero-ctas">
-          <button class="cta-primary" onclick="openEmailModal()">Get Early Access →</button>
-          <button class="cta-secondary" onclick="go('feed',document.getElementById('nv-feed'))">Explore the Terminal</button>
+          <button class="cta-primary" onclick="openEmailModal()">Request Access →</button>
+          <button class="cta-secondary" onclick="go('feed',document.getElementById('nv-feed'))">Browse Intelligence</button>
         </div>
         <div class="hero-metrics">
-          <div class="hm"><div class="hm-n">11</div><div class="hm-l">Stories tracked</div></div>
-          <div class="hm"><div class="hm-n">18</div><div class="hm-l">Companies monitored</div></div>
+          <div class="hm"><div class="hm-n">11</div><div class="hm-l">Signals this week</div></div>
+          <div class="hm"><div class="hm-n">18</div><div class="hm-l">Companies tracked</div></div>
           <div class="hm"><div class="hm-n">7</div><div class="hm-l">Active regulations</div></div>
-          <div class="hm"><div class="hm-n">8</div><div class="hm-l">Country profiles</div></div>
-          <div class="hm"><div class="hm-n">24</div><div class="hm-l">Verified sources</div></div>
+          <div class="hm"><div class="hm-n">8</div><div class="hm-l">Global markets</div></div>
+          <div class="hm"><div class="hm-n">2.4K</div><div class="hm-l">Professionals tracking AI</div></div>
         </div>
       </div>
 
-      <div style="font-family:var(--fm);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:12px">Built for teams that can't afford to be surprised</div>
+      <div style="font-family:var(--fm);font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:12px">WHAT'S INSIDE</div>
       <div class="feature-grid">
         <div class="feat-card"><div class="feat-icon">⚖️</div><div class="feat-title">Regulatory Intelligence</div><div class="feat-body">EU AI Act. US executive orders. China's CAC rules. Every law that affects your AI deployment — tracked with plain-English impact analysis, not legal jargon.</div></div>
         <div class="feat-card"><div class="feat-icon">📡</div><div class="feat-title">Model Release Radar</div><div class="feat-body">Every major model launch, benchmark, and capability shift — plus our "So What For You" editorial so you know what it means for your stack, not just the headlines.</div></div>
@@ -998,11 +998,15 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
     <!-- ══ FEED ══ -->
     <div class="page" id="page-feed">
       <div class="stats-row">
-        <div class="stat" style="--sc:rgba(79,70,229,0.4);--sv:var(--indigo-l)"><div class="stat-n">47</div><div class="stat-l">Stories This Week</div><div class="stat-d">↑ +12 vs last</div></div>
+        <div class="stat" style="--sc:rgba(79,70,229,0.4);--sv:var(--indigo-l)"><div class="stat-n">47</div><div class="stat-l">Signals This Week</div><div class="stat-d">↑ +12 vs last week</div></div>
         <div class="stat" style="--sc:rgba(6,182,212,0.4);--sv:var(--cyan-l)"><div class="stat-n">8</div><div class="stat-l">Model Releases</div><div class="stat-d">↑ +3 this month</div></div>
         <div class="stat" style="--sc:rgba(217,119,6,0.4);--sv:var(--amber-l)"><div class="stat-n">$120B</div><div class="stat-l">Funding This Month</div><div class="stat-d">↑ Record high</div></div>
-        <div class="stat" style="--sc:rgba(225,29,72,0.4);--sv:var(--rose-l)"><div class="stat-n">7</div><div class="stat-l">Active Bills</div><div class="stat-d">↑ +3 this quarter</div></div>
+        <div class="stat" style="--sc:rgba(225,29,72,0.4);--sv:var(--rose-l)"><div class="stat-n">7</div><div class="stat-l">Active Regulations</div><div class="stat-d">↑ +3 this quarter</div></div>
         <div class="stat" style="--sc:rgba(5,150,105,0.4);--sv:var(--emerald-l)"><div class="stat-n">24</div><div class="stat-l">Verified Sources</div><div class="stat-d">All active</div></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;margin-top:-6px">
+        <div style="font-family:var(--fm);font-size:9px;color:var(--text3);letter-spacing:0.04em">Last updated: March 5, 2026 · 09:41 UTC</div>
+        <div style="font-family:var(--fm);font-size:9px;color:var(--text3);letter-spacing:0.04em">Press <kbd style="background:var(--glass2);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:9px;color:var(--text2)">/</kbd> to search</div>
       </div>
       <div id="featuredCard"></div>
       <div class="filters">
@@ -1019,14 +1023,14 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
 
     <!-- ══ COMPANIES ══ -->
     <div class="page" id="page-companies">
-      <div class="ph"><div class="ph-left"><h1>AI <span style="font-style:italic;background:linear-gradient(90deg,var(--indigo-l),var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Companies</span></h1><p>18 organizations tracked · click any to explore their timeline</p></div></div>
+      <div class="ph"><div class="ph-left"><h1>AI <span style="font-style:italic;background:linear-gradient(90deg,var(--indigo-l),var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Companies</span></h1><p>18 AI companies · valuation · funding · product timelines</p></div></div>
       <div class="co-grid" id="coGrid"></div>
       <div id="coPanel"></div>
     </div>
 
     <!-- ══ GOVERNMENT ══ -->
     <div class="page" id="page-government">
-      <div class="ph"><div class="ph-left"><h1>Regulation & <span style="font-style:italic;background:linear-gradient(90deg,var(--rose-l),var(--amber-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Laws</span></h1><p>7 government actions · 3 active laws · 4 bills in progress</p></div></div>
+      <div class="ph"><div class="ph-left"><h1>Regulation & <span style="font-style:italic;background:linear-gradient(90deg,var(--rose-l),var(--amber-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Policy</span></h1><p>7 regulatory actions · EU · US · China · India — updated March 2026</p></div></div>
       <div class="filters">
         <div class="fp on" onclick="filterGov('all',this)">All</div>
         <div class="fp" onclick="filterGov('law',this)">Laws</div>
@@ -1040,14 +1044,14 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
 
     <!-- ══ COUNTRIES ══ -->
     <div class="page" id="page-countries">
-      <div class="ph"><div class="ph-left"><h1>Country <span style="font-style:italic;background:linear-gradient(90deg,var(--sky-l),var(--emerald-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Intelligence</span></h1><p>8 countries · AI investment · regulation · key players</p></div></div>
+      <div class="ph"><div class="ph-left"><h1>Country <span style="font-style:italic;background:linear-gradient(90deg,var(--sky-l),var(--emerald-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Intelligence</span></h1><p>8 major AI markets · policy posture · investment · key players</p></div></div>
       <div class="country-sel" id="ctryGrid"></div>
       <div id="ctryPanel"></div>
     </div>
 
     <!-- ══ SOURCES ══ -->
     <div class="page" id="page-sources">
-      <div class="ph"><div class="ph-left"><h1>Verified <span style="font-style:italic;background:linear-gradient(90deg,var(--emerald-l),var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Sources</span></h1><p>24 curated primary sources · human-verified · no aggregator fluff</p></div></div>
+      <div class="ph"><div class="ph-left"><h1>Verified <span style="font-style:italic;background:linear-gradient(90deg,var(--emerald-l),var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Sources</span></h1><p>24 primary sources · zero aggregator noise · every story traced to origin</p></div></div>
       <div class="src-grid" id="srcGrid"></div>
     </div>
 
@@ -1228,7 +1232,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--f);min-height:100
 
     <!-- ══ LINKEDIN ══ -->
     <div class="page" id="page-linkedin">
-      <div class="ph"><div class="ph-left"><h1>LinkedIn <span style="font-style:italic;background:linear-gradient(90deg,#5b9bd5,var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Posts</span></h1><p>Ready-to-post templates for every story · copy with one click · build your AI thought leadership</p></div></div>
+      <div class="ph"><div class="ph-left"><h1>Content <span style="font-style:italic;background:linear-gradient(90deg,#5b9bd5,var(--cyan-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Toolkit</span></h1><p>Ready-to-post templates · one-click copy · build your AI thought leadership</p></div></div>
 
       <div style="background:linear-gradient(135deg,rgba(10,102,194,0.1),rgba(6,182,212,0.06));border:1px solid rgba(10,102,194,0.2);border-radius:var(--r);padding:18px;margin-bottom:20px">
         <div style="font-family:var(--fd);font-size:15px;font-style:italic;color:var(--text);margin-bottom:6px">Why share glas.ai stories on LinkedIn?</div>
@@ -1312,7 +1316,7 @@ const SCORES=[
   {dim:'Defensibility Moat',val:20,lbl:'NEEDS WORK',col:'var(--amber)',col2:'var(--amber-l)'},
 ];
 
-const TITLES={home:'Platform <span>Overview</span>',feed:'Intelligence <span>Feed</span>',companies:'AI <span>Companies</span>',government:'Regulation & <span>Laws</span>',countries:'Country <span>Intelligence</span>',sources:'Verified <span>Sources</span>',strategy:'Strategy & <span>Roadmap</span>',pricing:'Pricing & <span>Costs</span>',linkedin:'LinkedIn <span>Posts</span>'};
+const TITLES={home:'Platform <span>Dashboard</span>',feed:'Intelligence <span>Feed</span>',companies:'AI <span>Companies</span>',government:'Regulation & <span>Policy</span>',countries:'Country <span>Intelligence</span>',sources:'Verified <span>Sources</span>',linkedin:'Content <span>Toolkit</span>'};
 
 /* ═══ CLOCK ═══ */
 setInterval(()=>{const n=new Date();document.getElementById('lv').textContent=`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;},5000);
