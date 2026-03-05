@@ -1575,16 +1575,20 @@ function renderScores(){
   </div>`).join('');
 }
 
+/* ═══ SECURITY HELPERS ═══ */
+function esc(s){if(!s)return '';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML;}
+function safeUrl(u){try{const p=new URL(u);return['https:','http:'].includes(p.protocol)?u:'#';}catch(e){return'#';}}
+
 /* ═══ MODAL ═══ */
 function slugify(t){return t.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'').substring(0,60);}
 function openMod(id){
   const n=NEWS.find(x=>x.id===id);if(!n)return;
   document.getElementById('mHd').innerHTML=`<button class="modal-x" onclick="closeMod()">✕</button>
-    <div style="margin-bottom:9px"><span class="badge ${n.cat}">${n.cat}</span></div>
-    <div style="font-family:var(--fd);font-size:18px;font-style:italic;letter-spacing:-0.02em;color:var(--text);line-height:1.35;padding-right:36px">${n.title}</div>`;
-  document.getElementById('mBd').innerHTML=`<div class="modal-art">${n.full||'<p>'+n.body+'</p>'}</div>
-    ${n.sowhat?`<div class="modal-sw"><div class="modal-sw-lbl">⚡ So What For You</div><p style="font-size:12.5px;color:var(--text2);line-height:1.7;margin:0">${n.sowhat}</p></div>`:``}`;
-  document.getElementById('mFt').innerHTML=`<div>${n.source} · ${n.date}</div><a href="${n.sourceUrl||'#'}" target="_blank" class="mlink">Read original →</a>`;
+    <div style="margin-bottom:9px"><span class="badge ${n.cat}">${esc(n.cat)}</span></div>
+    <div style="font-family:var(--fd);font-size:18px;font-style:italic;letter-spacing:-0.02em;color:var(--text);line-height:1.35;padding-right:36px">${esc(n.title)}</div>`;
+  document.getElementById('mBd').innerHTML=`<div class="modal-art">${n._live?'<p>'+esc(n.full||n.body)+'</p>':(n.full||'<p>'+n.body+'</p>')}</div>
+    ${n.sowhat?`<div class="modal-sw"><div class="modal-sw-lbl">⚡ So What For You</div><p style="font-size:12.5px;color:var(--text2);line-height:1.7;margin:0">${n._live?esc(n.sowhat):n.sowhat}</p></div>`:``}`;
+  document.getElementById('mFt').innerHTML=`<div>${esc(n.source)} · ${esc(n.date)}</div><a href="${safeUrl(n.sourceUrl||'#')}" target="_blank" rel="noopener noreferrer" class="mlink">Read original →</a>`;
   document.getElementById('mBg').classList.add('open');
   document.body.style.overflow='hidden';
   /* SEO slug URL */
@@ -1632,7 +1636,8 @@ async function fetchLive(){
     const data=await res.json();
     if(data.articles?.length){
       data.articles.forEach((a,i)=>{
-        const item={id:1000+i,cat:detectCat(a.title+' '+(a.description||'')),title:a.title,body:a.description||'',full:'<p>'+(a.content||a.description||'')+'</p>',sowhat:'Live article — analysis generating…',source:a.source?.name||'News',sourceUrl:a.url,date:new Date(a.publishedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}),verified:false,featured:false};
+        const rawTitle=String(a.title||'');
+        const item={id:1000+i,cat:detectCat(rawTitle+' '+(a.description||'')),title:rawTitle,body:String(a.description||''),full:String(a.content||a.description||''),sowhat:'Live article — analysis generating…',source:String(a.source?.name||'News'),sourceUrl:safeUrl(a.url||'#'),date:new Date(a.publishedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}),verified:false,featured:false,_live:true};
         if(!NEWS.find(n=>n.title===item.title))NEWS.unshift(item);
       });
     }
