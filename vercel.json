@@ -9,6 +9,12 @@
     {"src": "/api/(.*)", "dest": "/api/$1"},
     {"src": "/(.*)",     "dest": "/index.html"}
   ],
+  "crons": [
+    {
+      "path": "/api/digest",
+      "schedule": "0 9 * * 5"
+    }
+  ],
   "headers": [{"source": "/(.*)","headers": [
     {"key": "X-Content-Type-Options","value": "nosniff"},
     {"key": "X-Frame-Options","value": "DENY"},
@@ -16,7 +22,7 @@
     {"key": "Referrer-Policy","value": "strict-origin-when-cross-origin"},
     {"key": "Cache-Control","value": "public, max-age=3600, stale-while-revalidate=86400"},
     {"key": "Strict-Transport-Security","value": "max-age=31536000; includeSubDomains"},
-    {"key": "Content-Security-Policy","value": "default-src 'self'; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://script.google.com; img-src 'self' data: https:; frame-ancestors 'none';"},
+    {"key": "Content-Security-Policy","value": "default-src 'self'; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data: https:; frame-ancestors 'none';"},
     {"key": "Permissions-Policy","value": "camera=(), microphone=(), geolocation=()"}
   ]}]
 }
