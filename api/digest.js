@@ -8,7 +8,7 @@
  *   RESEND_KEY        — Resend.com API key (free tier: 3K emails/month)
  *   RESEND_AUDIENCE   — Resend audience ID (for subscriber list)
  *   CRON_SECRET       — Random string to protect manual triggers
- *   DIGEST_FROM       — Sender address, e.g. "glas.ai <digest@glas.ai>"
+ *   DIGEST_FROM       — Sender address, e.g. "OM Terminal <digest@omterminal.com>"
  *   GNEWS_KEY         — Same key used by /api/news
  *
  * Setup:
@@ -34,7 +34,7 @@ export default async function handler(req) {
 
   const resendKey = process.env.RESEND_KEY;
   const audienceId = process.env.RESEND_AUDIENCE;
-  const from = process.env.DIGEST_FROM || 'glas.ai <digest@glas.ai>';
+  const from = process.env.DIGEST_FROM || 'OM Terminal <digest@omterminal.com>';
 
   if (!resendKey || !audienceId) {
     console.error('Missing RESEND_KEY or RESEND_AUDIENCE');
@@ -47,7 +47,7 @@ export default async function handler(req) {
     // 1. Fetch latest stories from our own news endpoint
     const baseUrl = req.headers.get('x-forwarded-host')
       ? `https://${req.headers.get('x-forwarded-host')}`
-      : 'https://glas.ai';
+      : 'https://omterminal.com';
 
     const newsRes = await fetch(`${baseUrl}/api/news?q=artificial+intelligence&max=20`);
     const { articles = [] } = newsRes.ok ? await newsRes.json() : {};
@@ -121,7 +121,7 @@ function selectStories(articles) {
 function buildSubject(picks) {
   const week = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const lead = Object.values(picks)[0];
-  return `glas.ai Weekly · ${lead ? truncate(lead.title, 55) : 'AI Intelligence Digest'} · ${week}`;
+  return `OM Terminal Weekly · ${lead ? truncate(lead.title, 55) : 'AI Intelligence Digest'} · ${week}`;
 }
 
 /* ── HTML email template ── */
@@ -151,12 +151,12 @@ function buildHtml(picks) {
         </div>
         <h2 style="margin:0 0 8px;font-family:Georgia,serif;font-size:18px;font-style:italic;
           font-weight:400;color:#eeeef8;letter-spacing:-0.02em;line-height:1.35;">
-          <a href="${a.sourceUrl||'https://glas.ai'}" style="color:#eeeef8;text-decoration:none;">${escHtml(a.title)}</a>
+          <a href="${a.sourceUrl||'https://omterminal.com'}" style="color:#eeeef8;text-decoration:none;">${escHtml(a.title)}</a>
         </h2>
         <p style="margin:0 0 10px;font-size:13.5px;color:#8888a8;line-height:1.7;">
           ${escHtml(truncate(a.body, 200))}
         </p>
-        <a href="${a.sourceUrl||'https://glas.ai'}"
+        <a href="${a.sourceUrl||'https://omterminal.com'}"
           style="font-family:monospace;font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;
             color:#818cf8;text-decoration:none;">
           Read full story →
@@ -167,7 +167,7 @@ function buildHtml(picks) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>glas.ai Weekly Intelligence Digest</title></head>
+<title>OM Terminal Weekly Intelligence Digest</title></head>
 <body style="margin:0;padding:0;background:#05050f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#05050f;padding:40px 20px;">
     <tr><td>
@@ -181,9 +181,9 @@ function buildHtml(picks) {
                 <div style="width:32px;height:32px;border-radius:8px;
                   background:linear-gradient(135deg,#4f46e5,#06b6d4);
                   display:inline-block;text-align:center;line-height:32px;
-                  font-family:Georgia,serif;font-size:16px;font-weight:900;color:#fff;">g</div>
+                  font-family:Georgia,serif;font-size:11px;font-weight:900;color:#fff;">OM</div>
                 <span style="font-family:Georgia,serif;font-size:22px;font-style:italic;
-                  color:#818cf8;letter-spacing:-0.02em;">glas.ai</span>
+                  color:#818cf8;letter-spacing:-0.02em;">OM Terminal</span>
               </div>
               <div style="font-family:monospace;font-size:9px;letter-spacing:0.16em;
                 text-transform:uppercase;color:#44445a;margin-top:4px;">
@@ -213,14 +213,14 @@ function buildHtml(picks) {
         <tr><td style="padding-top:32px;border-top:1px solid #1e1e30;">
           <table width="100%" cellpadding="0" cellspacing="0"><tr>
             <td>
-              <a href="https://glas.ai" style="font-family:Georgia,serif;font-size:13px;
-                font-style:italic;color:#818cf8;text-decoration:none;">glas.ai</a>
+              <a href="https://omterminal.com" style="font-family:Georgia,serif;font-size:13px;
+                font-style:italic;color:#818cf8;text-decoration:none;">OM Terminal</a>
               <div style="font-family:monospace;font-size:9px;color:#44445a;margin-top:3px;letter-spacing:0.06em;">
                 AI Intelligence Terminal · Regulation · Models · Funding · Policy
               </div>
             </td>
             <td style="text-align:right;font-family:monospace;font-size:9px;color:#44445a;">
-              <a href="https://glas.ai/unsubscribe" style="color:#44445a;">Unsubscribe</a>
+              <a href="https://omterminal.com/unsubscribe" style="color:#44445a;">Unsubscribe</a>
             </td>
           </tr></table>
         </td></tr>

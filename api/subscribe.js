@@ -46,7 +46,7 @@ export default async function handler(req) {
       body: JSON.stringify({
         email,
         unsubscribed: false,
-        data: { source: 'glasai-waitlist', joined: new Date().toISOString() },
+        data: { source: 'omterminal-waitlist', joined: new Date().toISOString() },
       }),
     });
 

@@ -15,7 +15,7 @@ const CACHE_TTL = 60 * 30; // 30 min cache
 export default async function handler(req) {
   // CORS — allow only your domain in production
   const origin = req.headers.get('origin') || '';
-  const allowed = ['https://glas.ai', 'https://www.glas.ai'];
+  const allowed = ['https://omterminal.com', 'https://www.omterminal.com'];
   const corsOrigin = allowed.includes(origin) ? origin : allowed[0];
 
   // Preflight
