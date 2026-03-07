@@ -41,6 +41,18 @@ export type ArticleCategory =
   | 'other';
 
 /**
+ * Normalised category set produced by the normalization layer.
+ * Smaller, canonical vocabulary used downstream by the intelligence engine.
+ */
+export type NormalizedCategory =
+  | 'model_release'
+  | 'funding'
+  | 'regulation'
+  | 'research'
+  | 'company_news'
+  | 'analysis';
+
+/**
  * A raw article ingested from an external source.
  * Articles are the primary input to the intelligence pipeline.
  */
@@ -65,6 +77,17 @@ export interface Article {
   authors?: string[];
   /** Raw tags or topics attached by the source */
   tags?: string[];
+
+  // ── Normalization layer outputs (populated by articleNormalizer) ──────────
+
+  /** Canonical category assigned by the normalization layer */
+  normalizedCategory?: NormalizedCategory;
+  /** Canonical company names detected in the article text */
+  detectedCompanies?: string[];
+  /** Canonical model names detected in the article text */
+  detectedModels?: string[];
+  /** Canonical investor names detected in the article text */
+  detectedInvestors?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
