@@ -337,12 +337,25 @@ export interface Event {
 export type SignalDirection = 'bullish' | 'bearish' | 'neutral' | 'uncertain';
 
 /**
+ * High-level pattern type detected by the signals engine.
+ * Each type maps to a specific set of detection rules.
+ */
+export type SignalType =
+  | 'CAPITAL_ACCELERATION'
+  | 'MODEL_RELEASE_WAVE'
+  | 'REGULATION_ACTIVITY'
+  | 'RESEARCH_MOMENTUM'
+  | 'COMPANY_EXPANSION';
+
+/**
  * A higher-order intelligence signal synthesised from multiple events.
  * Signals represent trends, risks, or opportunities—not single events.
  */
 export interface Signal {
   /** Unique signal identifier */
   id: string;
+  /** Pattern type detected by the signals engine */
+  type?: SignalType;
   /** Short title summarising the signal, e.g. "Open-source models closing capability gap" */
   title: string;
   /** Detailed explanation of the signal and its implications */

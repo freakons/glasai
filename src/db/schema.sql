@@ -50,6 +50,10 @@ CREATE INDEX IF NOT EXISTS idx_events_source_article_id ON events (source_articl
 
 CREATE TABLE IF NOT EXISTS signals (
   id                 TEXT          PRIMARY KEY,
+  signal_type        TEXT          CHECK (signal_type IN (
+                       'CAPITAL_ACCELERATION','MODEL_RELEASE_WAVE',
+                       'REGULATION_ACTIVITY','RESEARCH_MOMENTUM','COMPANY_EXPANSION'
+                     )),
   title              TEXT          NOT NULL,
   description        TEXT          NOT NULL,
   supporting_events  TEXT[]        NOT NULL DEFAULT '{}',
@@ -63,6 +67,7 @@ CREATE TABLE IF NOT EXISTS signals (
   updated_at         TIMESTAMPTZ
 );
 
+CREATE INDEX IF NOT EXISTS idx_signals_signal_type ON signals (signal_type);
 CREATE INDEX IF NOT EXISTS idx_signals_direction   ON signals (direction);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at  ON signals (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_confidence  ON signals (confidence_score DESC);
