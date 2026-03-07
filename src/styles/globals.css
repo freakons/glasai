@@ -1,6 +1,68 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════
+   TAILWIND v4 DESIGN TOKENS (@theme)
+   Maps to Tailwind utility classes:
+   bg-primary, text-signal-cyan, p-ui-md, etc.
+══════════════════════════════════════ */
+@theme {
+  /* Colors — primary background */
+  --color-primary: #0A2540;
+  --color-ink: #05050f;
+  --color-ink-2: #0a0a1a;
+
+  /* Colors — signal system */
+  --color-signal-cyan: #06b6d4;
+  --color-signal-cyan-light: #67e8f9;
+  --color-signal-models: #7c3aed;
+  --color-signal-models-light: #a78bfa;
+  --color-signal-funding: #059669;
+  --color-signal-funding-light: #34d399;
+  --color-signal-regulation: #d97706;
+  --color-signal-regulation-light: #fbbf24;
+  --color-signal-alerts: #e11d48;
+  --color-signal-alerts-light: #fb7185;
+
+  /* Colors — extended palette */
+  --color-indigo: #4f46e5;
+  --color-indigo-light: #818cf8;
+  --color-cyan: #06b6d4;
+  --color-cyan-light: #67e8f9;
+  --color-violet: #7c3aed;
+  --color-violet-light: #a78bfa;
+  --color-amber: #d97706;
+  --color-amber-light: #fbbf24;
+  --color-rose: #e11d48;
+  --color-rose-light: #fb7185;
+  --color-emerald: #059669;
+  --color-emerald-light: #34d399;
+  --color-sky: #0284c7;
+  --color-sky-light: #38bdf8;
+
+  /* Colors — text scale */
+  --color-text-primary: #eeeef8;
+  --color-text-secondary: #8888a8;
+  --color-text-muted: #44445a;
+
+  /* Spacing — UI scale */
+  --spacing-ui-xs: 4px;
+  --spacing-ui-sm: 8px;
+  --spacing-ui-md: 16px;
+  --spacing-ui-lg: 24px;
+  --spacing-ui-xl: 32px;
+  --spacing-ui-2xl: 48px;
+
+  /* Border radius */
+  --radius-surface: 12px;
+  --radius-surface-sm: 7px;
+
+  /* Font families */
+  --font-sans: 'DM Sans', sans-serif;
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+/* ══════════════════════════════════════
    DESIGN TOKENS (CSS Custom Properties)
    Glassmorphism design system
 ══════════════════════════════════════ */
