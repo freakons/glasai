@@ -9,3 +9,5 @@ export { Badge } from './Badge';
 export { Card } from './Card';
 export { Panel } from './Panel';
 export { StatusIndicator } from './StatusIndicator';
+export { SignalCard } from './SignalCard';
+export type { SignalCardData, SignalCardProps } from './SignalCard';
