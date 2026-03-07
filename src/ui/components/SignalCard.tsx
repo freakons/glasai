@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Card } from './Card';
 import { Badge } from './Badge';
 import { StatusIndicator } from './StatusIndicator';
+import { SignalConfidenceMeter } from './SignalConfidenceMeter';
 import type { SignalType } from '@/types/intelligence';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,10 +211,7 @@ export function SignalCard({ signal, className = '' }: SignalCardProps) {
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <StatusIndicator state={status} />
-              <span>{formatConfidence(confidence)}</span>
-            </span>
+            <SignalConfidenceMeter confidence={confidence} />
             <span>{formatDate(createdAt)}</span>
           </span>
         </div>

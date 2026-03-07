@@ -11,3 +11,5 @@ export { Panel } from './Panel';
 export { StatusIndicator } from './StatusIndicator';
 export { SignalCard } from './SignalCard';
 export type { SignalCardData, SignalCardProps } from './SignalCard';
+export { SignalConfidenceMeter } from './SignalConfidenceMeter';
+export type { SignalConfidenceMeterProps } from './SignalConfidenceMeter';
