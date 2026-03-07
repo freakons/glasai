@@ -19,8 +19,13 @@ export async function GET(req: NextRequest) {
           ? `https://${req.headers.get('x-forwarded-host')}`
               : 'https://www.omterminal.com';
 
+      // Trigger snapshot regeneration (fire-and-forget)
       fetch(`${baseUrl}/api/snapshot?secret=${expected}`, { method: 'GET' })
           .catch((err) => console.error('[ingest] snapshot trigger failed:', err));
+
+      // Trigger signals engine (fire-and-forget)
+      fetch(`${baseUrl}/api/signals?secret=${expected}`, { method: 'GET' })
+          .catch((err) => console.error('[ingest] signals trigger failed:', err));
 
       return NextResponse.json({
               ok: true,
