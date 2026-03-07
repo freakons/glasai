@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { escapeHtml, truncate } from '@/lib/utils';
+import { escapeHtml, truncate } from '@/utils';
 
 export const runtime = 'edge';
 

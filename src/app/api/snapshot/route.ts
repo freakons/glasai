@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildSnapshot } from '@/services/snapshot/buildSnapshot';
+import { buildSnapshot } from '@/services/intelligence/buildSnapshot';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;

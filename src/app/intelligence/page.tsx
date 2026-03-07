@@ -1,4 +1,4 @@
-import { fetchArticles, fetchFeaturedArticle } from '@/services/data';
+import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
 import { NewsCard } from '@/components/cards/NewsCard';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';

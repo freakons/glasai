@@ -5,7 +5,7 @@
  * Future: automated ingestion from Crunchbase API and SEC filings.
  */
 
-import { fetchFundingRounds, type FundingRound } from '@/services/data';
+import { fetchFundingRounds, type FundingRound } from '@/lib/dataService';
 
 export interface FundingTrend {
   period: string;

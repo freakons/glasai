@@ -1,4 +1,4 @@
-import { fetchFundingRounds } from '@/services/data';
+import { fetchFundingRounds } from '@/lib/dataService';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 

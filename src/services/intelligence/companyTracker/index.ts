@@ -7,9 +7,9 @@
  * Future data sources: Crunchbase API, press releases, SEC filings.
  */
 
-import type { IntelligenceEvent } from '../types';
-import { createEvent } from '../types';
-import { fetchArticles } from '@/services/data';
+import type { IntelligenceEvent } from '@/types';
+import { createEvent } from '@/types';
+import { fetchArticles } from '@/lib/dataService';
 
 export interface CompanyProfile {
   id: string;

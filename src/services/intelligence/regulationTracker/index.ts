@@ -5,7 +5,7 @@
  * Future: automated monitoring of government gazette feeds and legislative databases.
  */
 
-import { fetchRegulations, type Regulation } from '@/services/data';
+import { fetchRegulations, type Regulation } from '@/lib/dataService';
 
 export interface RegulatoryAlert {
   regulationId: string;

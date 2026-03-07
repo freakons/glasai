@@ -5,7 +5,7 @@
  * Future: automated ingestion from arxiv, model cards, and company blogs.
  */
 
-import { fetchModels, type AIModel } from '@/services/data';
+import { fetchModels, type AIModel } from '@/lib/dataService';
 
 export interface ModelEvent {
   modelId: string;

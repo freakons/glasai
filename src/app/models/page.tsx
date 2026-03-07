@@ -1,4 +1,4 @@
-import { fetchModels } from '@/services/data';
+import { fetchModels } from '@/lib/dataService';
 import { PageHeader } from '@/components/ui/PageHeader';
 
 import type { Metadata } from 'next';

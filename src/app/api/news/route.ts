@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { detectCategory } from '@/lib/utils';
+import { detectCategory } from '@/utils';
 import { cacheConfig } from '@/config/cache';
 
 export const runtime = 'edge';

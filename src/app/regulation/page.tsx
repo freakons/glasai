@@ -1,4 +1,4 @@
-import { fetchRegulations } from '@/services/data';
+import { fetchRegulations } from '@/lib/dataService';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { RegulationCard } from '@/components/cards/RegulationCard';
 import { RegulationFilters } from './filters';
