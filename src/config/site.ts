@@ -16,6 +16,7 @@ export const siteConfig = {
     platform: [
       { label: 'Dashboard', href: '/', id: 'home', icon: 'home', chip: null },
       { label: 'Intelligence Feed', href: '/intelligence', id: 'intelligence', icon: 'zap', chip: 'LIVE' },
+      { label: 'Signals', href: '/signals', id: 'signals', icon: 'activity', chip: '47' },
       { label: 'Regulation', href: '/regulation', id: 'regulation', icon: 'scale', chip: '7' },
       { label: 'Models', href: '/models', id: 'models', icon: 'cpu', chip: null },
       { label: 'Funding', href: '/funding', id: 'funding', icon: 'trending-up', chip: null },
