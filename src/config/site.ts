@@ -19,6 +19,7 @@ export const siteConfig = {
       { label: 'Regulation', href: '/regulation', id: 'regulation', icon: 'scale', chip: '7' },
       { label: 'Models', href: '/models', id: 'models', icon: 'cpu', chip: null },
       { label: 'Funding', href: '/funding', id: 'funding', icon: 'trending-up', chip: null },
+      { label: 'Ecosystem Graph', href: '/graph', id: 'graph', icon: 'share-2', chip: null },
     ],
     info: [
       { label: 'About', href: '/about', id: 'about', icon: 'info' },
