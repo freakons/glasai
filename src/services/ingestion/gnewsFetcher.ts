@@ -1,5 +1,5 @@
 import { classifyArticle } from '../intelligence/classifier';
-import { query } from '../../lib/db';
+import { dbQuery as query } from '../../db/client';
 
 interface GNewsArticle {
     title: string;

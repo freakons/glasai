@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ingestGNews } from '@/services/ingestion/gnewsFetcher';
 
-export const maxDuration = 60;
+export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for longer ingestion windows
 
 export async function GET(req: NextRequest) {
     const cronSecret = req.headers.get('x-vercel-cron-secret') || '';

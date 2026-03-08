@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildSnapshot } from '@/services/intelligence/buildSnapshot';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 10; // Vercel Hobby plan limit
 
 export async function GET(req: NextRequest) {
     const cronSecret = req.headers.get('x-vercel-cron-secret') || '';

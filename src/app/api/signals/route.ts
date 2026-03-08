@@ -16,7 +16,7 @@ import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
 
-export const maxDuration = 60;
+export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for larger event lookbacks
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);

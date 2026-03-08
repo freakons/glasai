@@ -1,28 +1,6 @@
-import { neon } from '@neondatabase/serverless';
-
-if (!process.env.DATABASE_URL) {
-  console.warn('[db] DATABASE_URL not set - database features will be unavailable.');
-  }
-
-  // Tagged-template SQL client. Works on both Node.js and Edge runtimes.
-  // Usage: await sql`SELECT * FROM intelligence_events WHERE id = ${id}`
-  export const sql = process.env.DATABASE_URL
-    ? neon(process.env.DATABASE_URL)
-      : null;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      export async function query<T = Record<string, unknown>>(
-        strings: TemplateStringsArray,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ...values: any[]
-            ): Promise<T[]> {
-              if (!sql) return [];
-                try {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const result = await (sql as any)(strings, ...values);
-                            return result as T[];
-                              } catch (err) {
-                                  console.error('[db] query error:', err);
-                                      return [];
-                                        }
-                                        }
+/**
+ * @deprecated Use `@/db/client` instead.
+ * This module is kept for backward compatibility only.
+ * All consumers have been migrated to src/db/client.ts.
+ */
+export { dbQuery as query, sql } from '../db/client';

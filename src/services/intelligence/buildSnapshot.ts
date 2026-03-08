@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-import { query } from '../../lib/db';
+import { dbQuery as query } from '../../db/client';
 
 interface SnapshotEvent {
     id: number;
