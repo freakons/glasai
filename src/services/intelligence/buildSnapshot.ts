@@ -1,72 +1,120 @@
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
 import { dbQuery as query } from '../../db/client';
 
 interface SnapshotEvent {
-    id: number;
+  id: number;
     title: string;
-    summary: string;
-    source_url: string;
-    source_name: string;
-    category: string;
-    published_at: string;
-    created_at: string;
-}
+      summary: string;
+        source_url: string;
+          source_name: string;
+            category: string;
+              published_at: string;
+                created_at: string;
+                }
 
-interface IntelligenceSnapshot {
-    generated_at: string;
-    total: number;
-    events: SnapshotEvent[];
-    by_category: Record<string, SnapshotEvent[]>;
-}
+                export interface IntelligenceSnapshot {
+                  generated_at: string;
+                    total: number;
+                      events: SnapshotEvent[];
+                        by_category: Record<string, SnapshotEvent[]>;
+                        }
 
-export async function buildSnapshot(): Promise<IntelligenceSnapshot> {
-    try {
-          const rows = await query<SnapshotEvent>`
-                SELECT id, title, summary, source_url, source_name,
-                             category, published_at::text,
-                                          created_at::text
-                                                FROM intelligence_events
-                                                      ORDER BY published_at DESC
-                                                            LIMIT 200
-                                                                `;
+                        /**
+                         * Build a snapshot of the latest intelligence events from Neon,
+                          * then persist it to the `snapshots` table (survives redeploys).
+                           * Also returns the latest snapshot from DB if DB is unavailable.
+                            */
+                            export async function buildSnapshot(): Promise<IntelligenceSnapshot> {
+                              try {
+                                  const rows = await query<SnapshotEvent>`
+                                        SELECT id, title, summary, source_url, source_name,
+                                                     category, published_at::text,
+                                                                  created_at::text
+                                                                        FROM intelligence_events
+                                                                              ORDER BY published_at DESC
+                                                                                    LIMIT 200
+                                                                                        `;
 
-      const by_category: Record<string, SnapshotEvent[]> = {};
-          for (const event of rows) {
-                  const cat = event.category || 'COMPANY_MOVE';
-                  if (!by_category[cat]) by_category[cat] = [];
-                  by_category[cat].push(event);
-          }
+                                                                                            const by_category: Record<string, SnapshotEvent[]> = {};
+                                                                                                for (const event of rows) {
+                                                                                                      const cat = event.category || 'GENERAL';
+                                                                                                            if (!by_category[cat]) by_category[cat] = [];
+                                                                                                                  by_category[cat].push(event);
+                                                                                                                      }
 
-      const snapshot: IntelligenceSnapshot = {
-              generated_at: new Date().toISOString(),
-              total: rows.length,
-              events: rows,
-              by_category,
-      };
+                                                                                                                          const snapshot: IntelligenceSnapshot = {
+                                                                                                                                generated_at: new Date().toISOString(),
+                                                                                                                                      total: rows.length,
+                                                                                                                                            events: rows,
+                                                                                                                                                  by_category,
+                                                                                                                                                      };
 
-      await writeSnapshot(snapshot);
-          console.log(`[snapshot] Built snapshot: ${rows.length} events across ${Object.keys(by_category).length} categories`);
-          return snapshot;
-    } catch (err) {
-          console.error('[snapshot] Failed to build snapshot:', err);
-          const fallback: IntelligenceSnapshot = {
-                  generated_at: new Date().toISOString(),
-                  total: 0,
-                  events: [],
-                  by_category: {},
-          };
-          return fallback;
-    }
-}
+                                                                                                                                                          // Persist to DB (Step 3 fix: no more /public/data/ writes that vanish on redeploy)
+                                                                                                                                                              await persistSnapshot(snapshot);
 
-async function writeSnapshot(snapshot: IntelligenceSnapshot): Promise<void> {
-    try {
-          const dir = join(process.cwd(), 'public', 'data');
-          await mkdir(dir, { recursive: true });
-          const file = join(dir, 'intelligence.json');
-          await writeFile(file, JSON.stringify(snapshot, null, 2), 'utf-8');
-    } catch (err) {
-          console.error('[snapshot] Failed to write snapshot file:', err);
-    }
-}
+                                                                                                                                                                  console.log(
+                                                                                                                                                                        `[snapshot] Built snapshot: ${rows.length} events across ${Object.keys(by_category).length} categories`
+                                                                                                                                                                            );
+                                                                                                                                                                                return snapshot;
+                                                                                                                                                                                  } catch (err) {
+                                                                                                                                                                                      console.error('[snapshot] Failed to build snapshot:', err);
+
+                                                                                                                                                                                          // Try to return last good snapshot from DB
+                                                                                                                                                                                              try {
+                                                                                                                                                                                                    const last = await query<{ payload: IntelligenceSnapshot }>`
+                                                                                                                                                                                                            SELECT payload FROM snapshots ORDER BY generated_at DESC LIMIT 1
+                                                                                                                                                                                                                  `;
+                                                                                                                                                                                                                        if (last.length > 0) {
+                                                                                                                                                                                                                                console.log('[snapshot] Returning last persisted snapshot from DB');
+                                                                                                                                                                                                                                        return last[0].payload;
+                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                  } catch {
+                                                                                                                                                                                                                                                        // ignore
+                                                                                                                                                                                                                                                            }
+
+                                                                                                                                                                                                                                                                return {
+                                                                                                                                                                                                                                                                      generated_at: new Date().toISOString(),
+                                                                                                                                                                                                                                                                            total: 0,
+                                                                                                                                                                                                                                                                                  events: [],
+                                                                                                                                                                                                                                                                                        by_category: {},
+                                                                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                              }
+
+                                                                                                                                                                                                                                                                                              /**
+                                                                                                                                                                                                                                                                                               * Persist snapshot to Neon `snapshots` table.
+                                                                                                                                                                                                                                                                                                * Keeps only the latest 10 snapshots to avoid unbounded growth.
+                                                                                                                                                                                                                                                                                                 */
+                                                                                                                                                                                                                                                                                                 async function persistSnapshot(snapshot: IntelligenceSnapshot): Promise<void> {
+                                                                                                                                                                                                                                                                                                   try {
+                                                                                                                                                                                                                                                                                                       await query`
+                                                                                                                                                                                                                                                                                                             INSERT INTO snapshots (generated_at, total, payload)
+                                                                                                                                                                                                                                                                                                                   VALUES (${snapshot.generated_at}, ${snapshot.total}, ${JSON.stringify(snapshot)})
+                                                                                                                                                                                                                                                                                                                       `;
+
+                                                                                                                                                                                                                                                                                                                           // Prune old snapshots — keep latest 10
+                                                                                                                                                                                                                                                                                                                               await query`
+                                                                                                                                                                                                                                                                                                                                     DELETE FROM snapshots
+                                                                                                                                                                                                                                                                                                                                           WHERE id NOT IN (
+                                                                                                                                                                                                                                                                                                                                                   SELECT id FROM snapshots ORDER BY generated_at DESC LIMIT 10
+                                                                                                                                                                                                                                                                                                                                                         )
+                                                                                                                                                                                                                                                                                                                                                             `;
+                                                                                                                                                                                                                                                                                                                                                               } catch (err) {
+                                                                                                                                                                                                                                                                                                                                                                   console.error('[snapshot] Failed to persist snapshot to DB:', err);
+                                                                                                                                                                                                                                                                                                                                                                     }
+                                                                                                                                                                                                                                                                                                                                                                     }
+
+                                                                                                                                                                                                                                                                                                                                                                     /**
+                                                                                                                                                                                                                                                                                                                                                                      * Retrieve the latest snapshot from the DB (for API consumption without rebuild).
+                                                                                                                                                                                                                                                                                                                                                                       */
+                                                                                                                                                                                                                                                                                                                                                                       export async function getLatestSnapshot(): Promise<IntelligenceSnapshot | null> {
+                                                                                                                                                                                                                                                                                                                                                                         try {
+                                                                                                                                                                                                                                                                                                                                                                             const rows = await query<{ payload: IntelligenceSnapshot }>`
+                                                                                                                                                                                                                                                                                                                                                                                   SELECT payload FROM snapshots ORDER BY generated_at DESC LIMIT 1
+                                                                                                                                                                                                                                                                                                                                                                                       `;
+                                                                                                                                                                                                                                                                                                                                                                                           return rows.length > 0 ? rows[0].payload : null;
+                                                                                                                                                                                                                                                                                                                                                                                             } catch (err) {
+                                                                                                                                                                                                                                                                                                                                                                                                 console.error('[snapshot] Failed to retrieve snapshot:', err);
+                                                                                                                                                                                                                                                                                                                                                                                                     return null;
+                                                                                                                                                                                                                                                                                                                                                                                                       }
+                                                                                                                                                                                                                                                                                                                                                                                                       }
+                                                                                                                                                                                                                                                                                                                                                                                                       
