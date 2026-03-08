@@ -25,7 +25,7 @@ import {
   getSnapshots,
 } from '@/services/storage/snapshotStore';
 
-export const maxDuration = 60;
+export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for bulk snapshot operations
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth helper

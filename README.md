@@ -36,7 +36,7 @@ A professional-grade AI intelligence terminal tracking regulation, model release
 Add in **Vercel → Settings → Environment Variables**:
 
 ```
-GNEWS_KEY          GNews.io API key
+GNEWS_API_KEY          GNews.io API key
 RESEND_KEY         Resend.com API key
 RESEND_AUDIENCE    Resend audience ID
 CRON_SECRET        Random string to protect manual digest trigger
@@ -54,7 +54,7 @@ vercel dev
 
 Create `.env.local`:
 ```
-GNEWS_KEY=your_key
+GNEWS_API_KEY=your_key
 RESEND_KEY=your_key
 RESEND_AUDIENCE=your_audience_id
 CRON_SECRET=any_random_string

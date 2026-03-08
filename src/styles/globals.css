@@ -57,9 +57,9 @@
   --radius-surface-sm: 7px;
 
   /* Font families */
-  --font-sans: 'DM Sans', sans-serif;
-  --font-display: 'Instrument Serif', Georgia, serif;
-  --font-mono: 'DM Mono', monospace;
+  --font-sans: var(--font-dm-sans), sans-serif;
+  --font-display: var(--font-instrument-serif), Georgia, serif;
+  --font-mono: var(--font-dm-mono), monospace;
 }
 
 /* ══════════════════════════════════════
