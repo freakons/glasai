@@ -3,6 +3,7 @@ import { NewsCard } from '@/components/cards/NewsCard';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { IntelligenceFilters } from './filters';
+import { CommandBar } from '@/ui/layout/CommandBar';
 
 import type { Metadata } from 'next';
 
@@ -39,6 +40,8 @@ export default async function IntelligencePage() {
           <NewsCard key={article.id} article={article} />
         ))}
       </div>
+
+      <CommandBar />
     </>
   );
 }
