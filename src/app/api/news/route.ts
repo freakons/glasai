@@ -25,7 +25,7 @@ export async function OPTIONS(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const corsOrigin = getCorsOrigin(req);
-  const key = process.env.GNEWS_KEY;
+  const key = process.env.GNEWS_API_KEY;
 
   if (!key) {
     return NextResponse.json(
