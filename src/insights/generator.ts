@@ -2,6 +2,7 @@ import { TrendResult } from '@/trends/types';
 import { Insight } from './types';
 import { generateAIInsight } from './aiGenerator';
 import { generateTrendInsight } from '@/services/intelligence/insightSummaries';
+import { scoreOpportunity } from '@/services/intelligence/opportunityScoring';
 
 const MIN_SIGNAL_COUNT = 3;
 
@@ -38,13 +39,22 @@ export async function generateInsights(trends: TrendResult[]): Promise<Insight[]
         }
       }
 
-      return {
+      const opportunity: any = {
         title:      `${trend.topic} dominating ${categoryLabel(trend.category)}`,
         summary,
         category:   trend.category,
         topics:     [trend.topic, ...trend.entities].slice(0, 5),
         confidence: trend.confidence,
       };
+
+      opportunity.score = scoreOpportunity({
+        trendScore:      trend.score,
+        velocity:        trend.velocity_score,
+        marketSignals:   trend.signal_count || 1,
+        sourceDiversity: new Set(trend.entities).size,
+      });
+
+      return opportunity;
     }),
   );
 
