@@ -92,3 +92,31 @@ export async function dbQuery<T = Record<string, unknown>>(
 
 /** Raw Neon SQL client (null if DATABASE_URL not configured). */
 export const sql = getClient;
+
+/**
+ * Execute a tagged-template SQL query and throw on any error.
+ *
+ * Unlike dbQuery (which logs and returns []), this variant propagates errors
+ * so callers can return a proper HTTP 503 instead of silently serving stale
+ * or empty data.  Use this for critical read paths.
+ *
+ * @example
+ * try {
+ *   const rows = await dbQueryStrict<SignalRow>`SELECT * FROM signals LIMIT 50`;
+ * } catch (err) {
+ *   return NextResponse.json({ ok: false, error: 'DB unavailable' }, { status: 503 });
+ * }
+ */
+export async function dbQueryStrict<T = Record<string, unknown>>(
+  strings: TemplateStringsArray,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...values: any[]
+): Promise<T[]> {
+  const client = getClient();
+  if (!client) {
+    throw new Error('[db/client] DATABASE_URL is not configured — cannot execute query.');
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = await withDbTimeout((client as any)(strings, ...values));
+  return result as T[];
+}

@@ -6,8 +6,10 @@ export const runtime = 'nodejs';
  * Triggered automatically by the ingest pipeline or called on demand.
  *
  * GET /api/signals
- *   No params required — returns stored signals in frontend format (with
- *   mock-data fallback).  Safe to call from the frontend without auth.
+ *   No params required — returns stored signals in frontend format.
+ *   Returns source='db' when real data exists, source='empty' when the DB
+ *   has no signals yet.  Never silently falls back to mock data; callers
+ *   must detect source='empty' and show an appropriate empty state.
  *
  * GET /api/signals?secret=<CRON_SECRET>
  *   Runs signal generation and returns newly generated signals.
@@ -15,6 +17,12 @@ export const runtime = 'nodejs';
  * GET /api/signals?list=true
  *   Returns the most recent stored signals in the internal engine format
  *   without re-running the engine.
+ *
+ * Error transparency contract:
+ *   DB unavailable        → HTTP 503  { ok: false, source: 'error', error: '...' }
+ *   No signals in DB yet  → HTTP 200  { ok: true,  source: 'empty', signals: [], count: 0 }
+ *   Real signals found    → HTTP 200  { ok: true,  source: 'db',    signals: [...] }
+ *   Engine failure        → HTTP 500  { ok: false, error: '...' }
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,11 +34,11 @@ import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
 import { getSignals } from '@/db/queries';
-import { MOCK_SIGNALS } from '@/data/mockSignals';
 
 export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for larger event lookbacks
 
-const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30' };
+// Short TTL so fresh data appears quickly; stale-while-revalidate keeps UX snappy
+const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60' };
 
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
@@ -44,7 +52,8 @@ export async function GET(req: NextRequest) {
   const listOnly    = searchParams.get('list') === 'true';
 
   // ── Frontend mode ─────────────────────────────────────────────────────────
-  // Called without auth params → serve frontend-formatted signals with fallback.
+  // Called without auth params → serve frontend-formatted signals from DB.
+  // No mock-data fallback: callers receive an explicit source indicator.
   const isAuthRequest =
     listOnly ||
     (expected !== '' && (cronSecret === expected || querySecret === expected));
@@ -52,16 +61,19 @@ export async function GET(req: NextRequest) {
   if (!isAuthRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
 
+    // 1. Edge cache (KV-backed, cross-region)
     const edgeCached = await getEdgeSignals();
     if (edgeCached) {
       return Response.json(edgeCached);
     }
 
+    // 2. In-process memory cache (per-instance, 5 s)
     const cached = getCache('signals', 5000);
     if (cached) {
       return Response.json(cached);
     }
 
+    // 3. Database query
     try {
       const dbSignals = await getSignals(limit);
 
@@ -73,19 +85,31 @@ export async function GET(req: NextRequest) {
         return NextResponse.json(payload, { headers: CACHE_HEADERS });
       }
 
-      // Empty DB — fall back to mock data
-      const signals = MOCK_SIGNALS.slice(0, limit);
-      logWithRequestId(reqId, 'signals', `source=mock signals=${signals.length} ms=${Date.now() - t0}`);
+      // DB is reachable but has no signals yet — return an explicit empty state.
+      // Do NOT serve mock data: this would mask a real pipeline issue.
+      logWithRequestId(reqId, 'signals', `source=empty ms=${Date.now() - t0}`);
       return NextResponse.json(
-        { ok: true, source: 'mock', signals, count: signals.length },
+        {
+          ok: true,
+          source: 'empty',
+          signals: [],
+          count: 0,
+          message: 'No signals ingested yet. Trigger /api/ingest to populate.',
+        },
         { headers: CACHE_HEADERS },
       );
     } catch (err) {
-      console.error('[api/signals] frontend fetch error:', err);
-      const signals = MOCK_SIGNALS.slice(0, limit);
+      // DB query failed — surface the error clearly rather than hiding it with mock data.
+      console.error('[api/signals] DB fetch error:', err);
       return NextResponse.json(
-        { ok: true, source: 'mock', signals, count: signals.length },
-        { headers: CACHE_HEADERS },
+        {
+          ok: false,
+          source: 'error',
+          error: process.env.NODE_ENV === 'production' ? 'Database unavailable' : String(err),
+          signals: [],
+          count: 0,
+        },
+        { status: 503 },
       );
     }
   }
@@ -113,6 +137,8 @@ export async function GET(req: NextRequest) {
     // 3. Persist new signals (idempotent via ON CONFLICT DO NOTHING)
     const inserted = await saveSignals(signals);
 
+    logWithRequestId(reqId, 'signals', `engine: events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
+
     return NextResponse.json({
       ok:               true,
       eventsAnalysed:   events.length,
@@ -122,8 +148,8 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error('[api/signals] route error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('[api/signals] engine error:', err);
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   }
 }
 

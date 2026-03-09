@@ -4,6 +4,7 @@ import { processSignal } from '@/intelligence/processor';
 import { scoreSignal } from '@/intelligence/scoring';
 import { isDuplicate } from '@/intelligence/deduplicator';
 import { getSources } from './sources/registry';
+import { getProvider } from '@/lib/ai';
 
 const MIN_SCORE = 40;
 
@@ -11,6 +12,16 @@ const MIN_SCORE = 40;
 export async function runHarvester(): Promise<void> {
   const sources = getSources();
   console.log(`[harvester/runner] Harvester running with ${sources.length} sources`);
+
+  // Resolve the active AI provider once per run; log which one is in use.
+  let aiProviderName = 'none';
+  try {
+    const provider = await getProvider();
+    aiProviderName = provider.constructor.name;
+    console.log(`[harvester/runner] AI provider: ${aiProviderName}`);
+  } catch (err) {
+    console.warn('[harvester/runner] No AI provider available — pipeline will use rule-based fallback:', err instanceof Error ? err.message : err);
+  }
 
   let totalFetched = 0;
   let totalProcessed = 0;
@@ -33,7 +44,7 @@ export async function runHarvester(): Promise<void> {
     totalFetched += rawSignals.length;
 
     for (const raw of rawSignals) {
-      const normalized = normalizeSignal(raw);
+      const normalized = normalizeSignal(raw, aiProviderName);
 
       let intelligence;
       try {
