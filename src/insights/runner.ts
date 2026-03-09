@@ -3,6 +3,7 @@ import { TrendResult } from '@/trends/types';
 import { Insight } from './types';
 import { generateInsights } from './generator';
 import { generateDigest } from './digest';
+import { generateNewsletter } from './newsletter';
 
 // ── Row type returned by the trends query ─────────────────────────────────────
 
@@ -115,6 +116,12 @@ export async function runInsightGeneration(): Promise<void> {
   const digest = generateDigest(insights);
   console.log('\n');
   console.log(digest);
+
+  const newsletter = await generateNewsletter(insights);
+  console.log('\n');
+  console.log('AI Trend Newsletter');
+  console.log('====================');
+  console.log(newsletter);
 
   try {
     await storeInsights(insights);
