@@ -1,18 +1,22 @@
 import { NormalizedSignal } from './types';
+import { IntelligenceResult } from '@/intelligence/types';
 
 const INGEST_URL = process.env.INGEST_URL ?? 'http://localhost:3000/api/intelligence/ingest';
 
-// Default confidence for harvester-sourced signals (mid-range pending trust evaluation).
-const HARVESTER_CONFIDENCE = 50;
-
-export async function sendSignal(signal: NormalizedSignal): Promise<void> {
+export async function sendSignal(
+  signal: NormalizedSignal,
+  intelligence?: IntelligenceResult,
+): Promise<void> {
   const payload = {
     title: signal.title,
-    summary: signal.description,
+    description: signal.description,
+    summary: intelligence?.summary ?? signal.description,
+    category: intelligence?.category,
+    entities: intelligence?.entities,
     source: signal.source,
     url: signal.url,
     ai_model: signal.ai_model,
-    confidence: HARVESTER_CONFIDENCE,
+    confidence: intelligence?.confidence ?? 50,
   };
 
   let res: Response;
@@ -33,5 +37,5 @@ export async function sendSignal(signal: NormalizedSignal): Promise<void> {
     throw new Error(`Ingest API error: ${res.status}`);
   }
 
-  console.log(`[harvester/sender] sent: "${signal.title}" (${signal.source})`);
+  console.log(`[harvester/sender] sent: "${signal.title}" (${signal.source}) [${intelligence?.category ?? 'unprocessed'}]`);
 }
