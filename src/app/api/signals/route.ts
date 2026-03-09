@@ -19,6 +19,9 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
+import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { getCache, setCache } from '@/lib/memoryCache';
+import { getEdgeSignals, setEdgeSignals } from '@/lib/edgeCache';
 import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
@@ -31,6 +34,7 @@ const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30'
 
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
+  const reqId = createRequestId();
   validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
 
   const { searchParams } = new URL(req.url);
@@ -47,20 +51,31 @@ export async function GET(req: NextRequest) {
 
   if (!isAuthRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
+
+    const edgeCached = await getEdgeSignals();
+    if (edgeCached) {
+      return Response.json(edgeCached);
+    }
+
+    const cached = getCache('signals', 5000);
+    if (cached) {
+      return Response.json(cached);
+    }
+
     try {
       const dbSignals = await getSignals(limit);
 
       if (dbSignals.length > 0) {
-        console.log(`[signals] source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
-        return NextResponse.json(
-          { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length },
-          { headers: CACHE_HEADERS },
-        );
+        const payload = { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length };
+        await setEdgeSignals(payload);
+        setCache('signals', payload);
+        logWithRequestId(reqId, 'signals', `source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
+        return NextResponse.json(payload, { headers: CACHE_HEADERS });
       }
 
       // Empty DB — fall back to mock data
       const signals = MOCK_SIGNALS.slice(0, limit);
-      console.log(`[signals] source=mock signals=${signals.length} ms=${Date.now() - t0}`);
+      logWithRequestId(reqId, 'signals', `source=mock signals=${signals.length} ms=${Date.now() - t0}`);
       return NextResponse.json(
         { ok: true, source: 'mock', signals, count: signals.length },
         { headers: CACHE_HEADERS },

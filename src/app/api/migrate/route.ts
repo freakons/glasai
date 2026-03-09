@@ -146,6 +146,15 @@ const STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_access_requests_created_at ON access_requests (created_at DESC)`,
+
+  // ── Trend time-series ─────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS trend_timeseries (
+    id           SERIAL PRIMARY KEY,
+    topic        TEXT NOT NULL,
+    signal_count INT NOT NULL,
+    recorded_at  TIMESTAMP DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_trend_timeseries_topic_time ON trend_timeseries(topic, recorded_at DESC)`,
 ];
 
 /** Table names that are created (or verified) by the migration. */
@@ -158,6 +167,7 @@ const TABLES_CREATED = [
   'entities',
   'signal_entities',
   'access_requests',
+  'trend_timeseries',
 ];
 
 export async function POST(req: NextRequest) {

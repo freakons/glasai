@@ -1,6 +1,7 @@
 import { dbQuery } from '@/db/client';
 import { TrendSignal, TrendResult } from './types';
 import { aggregateTrends } from './aggregator';
+import { recordTrendSnapshot } from '@/services/analytics/trendTimeseries';
 
 // ── Row type returned by the signals query ────────────────────────────────────
 
@@ -160,6 +161,14 @@ export async function runTrendAnalysis(): Promise<void> {
   } catch (err) {
     // DB may not have the trends table yet; log and continue
     console.warn('[trends/runner] could not store trends (DB unavailable or table missing):', err);
+  }
+
+  try {
+    for (const trend of trends) {
+      await recordTrendSnapshot(trend.topic, trend.signal_count);
+    }
+  } catch (err) {
+    console.warn('[trends/runner] could not record trend timeseries:', err);
   }
 
   console.log(`[trends/runner] done — ${trends.length} trend(s) detected`);

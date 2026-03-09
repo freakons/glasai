@@ -19,6 +19,8 @@
  *   triggerPipelineOnce(); // fire-and-forget, safe to call on every request
  */
 
+import { enqueue } from '@/lib/queue';
+
 // Heavy service modules are imported dynamically inside runPipeline() so they
 // are excluded from the bundle of any route that imports this module at the
 // top level (e.g. /api/opportunities).  The import() calls resolve instantly
@@ -33,6 +35,9 @@ const COOLDOWN_MS = 5 * 60 * 1_000; // 5 minutes
 
 /** Epoch-ms of the last trigger dispatch. 0 = never triggered. */
 let lastTriggeredAt = 0;
+
+/** True while a pipeline execution is in progress. */
+let pipelineRunning = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -60,12 +65,27 @@ export function triggerPipelineOnce(): void {
   // see the updated timestamp before the async work begins.
   lastTriggeredAt = now;
 
-  void runPipeline();
+  void enqueue(async () => {
+    await runPipelineSafe();
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal
 // ─────────────────────────────────────────────────────────────────────────────
+
+export async function runPipelineSafe(): Promise<void> {
+  if (pipelineRunning) {
+    console.log('[pipeline] already running, skipping');
+    return;
+  }
+  pipelineRunning = true;
+  try {
+    await runPipeline();
+  } finally {
+    pipelineRunning = false;
+  }
+}
 
 async function runPipeline(): Promise<void> {
   try {
@@ -75,12 +95,14 @@ async function runPipeline(): Promise<void> {
     const { getRecentEvents }          = await import('@/services/storage/eventStore');
     const { generateSignalsFromEvents } = await import('@/services/signals/signalEngine');
     const { saveSignals }              = await import('@/services/storage/signalStore');
+    const { recordPipelineRun }        = await import('@/lib/pipelineHealth');
 
     const { ingested }     = await ingestGNews();
     const events           = await getRecentEvents(500);
     const signals          = generateSignalsFromEvents(events);
     const signalsSaved     = await saveSignals(signals);
 
+    recordPipelineRun(signalsSaved);
     console.log(
       `[pipeline] self-heal complete — ingested=${ingested} events=${events.length} signals=${signalsSaved}`,
     );

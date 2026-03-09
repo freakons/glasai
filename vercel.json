@@ -8,6 +8,10 @@
     {
       "path": "/api/digest",
       "schedule": "0 9 * * 5"
+    },
+    {
+      "path": "/api/pipeline/run",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -41,6 +41,20 @@ function getClient(): NeonQueryFunction<false, false> | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Timeout helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function withDbTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs = 5000
+): Promise<T> {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('db timeout')), timeoutMs)
+  );
+  return Promise.race([promise, timeout]) as Promise<T>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Query helper
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -64,7 +78,7 @@ export async function dbQuery<T = Record<string, unknown>>(
   if (!client) return [];
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (client as any)(strings, ...values);
+    const result = await withDbTimeout((client as any)(strings, ...values));
     return result as T[];
   } catch (err) {
     console.error('[db/client] Query error:', err);
