@@ -87,7 +87,9 @@ export async function POST(req: NextRequest) {
   const reqId = createRequestId();
 
   // Validate critical env vars (throws HTTP 500 in production if missing)
-  validateEnvironment(['DATABASE_URL', 'CRON_SECRET', 'GNEWS_API_KEY']);
+  // NOTE: GNEWS_API_KEY is NOT required here — the harvester also uses RSS, GitHub,
+  // and Arxiv sources that work without it. Missing GNews is handled gracefully inside runHarvester.
+  validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
 
   // Warn (not throw) if no LLM provider is configured
   checkLLMProvider();
@@ -168,12 +170,36 @@ export async function POST(req: NextRequest) {
     error_msg: anyError ? stages.filter((s) => s.error).map((s) => s.stage).join(',') : undefined,
   });
 
+  // ── Post-run diagnostics ──────────────────────────────────────────────────
+  let signalDiagnostics: {
+    totalSignals: number | string;
+    latestSignal: Record<string, unknown> | null;
+  } = { totalSignals: 'unknown', latestSignal: null };
+
+  try {
+    const countRows  = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`;
+    const sampleRows = await dbQuery<Record<string, unknown>>`
+      SELECT id, title, status, category, confidence, trust_score, created_at
+      FROM signals
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    signalDiagnostics = {
+      totalSignals: parseInt(countRows[0]?.count ?? '0', 10),
+      latestSignal: sampleRows[0] ?? null,
+    };
+    console.log(`[intelligence/run] post-run diagnostics: totalSignals=${signalDiagnostics.totalSignals}`);
+  } catch (err) {
+    console.warn('[intelligence/run] diagnostics query failed:', err);
+  }
+
   return NextResponse.json({
     ok:      !anyError,
     status:  overallStatus,
     stages,
     totalMs,
     timestamp: new Date().toISOString(),
+    diagnostics: signalDiagnostics,
   }, {
     // Return 207 Multi-Status when some stages failed but others succeeded
     status: anyError ? 207 : 200,
