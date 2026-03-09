@@ -8,11 +8,13 @@
  *
  * Pipeline
  * ────────
- *  1. Fetch latest signals from DB (falls back to mock data)
+ *  1. Fetch latest signals from DB
+ *     - Production + empty DB → return db-empty sentinel immediately
+ *     - Development + empty DB → fall back to MOCK_SIGNALS
  *  2. Map each signal → SignalInput and call computeSignalScore()
  *  3. Feed scored results into rankOpportunities() (top 20, score desc)
  *  4. Derive marketBias from the direction distribution of ranked signals
- *  5. Return { marketBias, signals, timestamp }
+ *  5. Return { marketBias, signals, source, timestamp }
  *
  * Response shape
  * ──────────────
@@ -22,6 +24,7 @@
  *      { rank, symbol, score, direction, velocity, volumeSpike, timestamp },
  *      …
  *    ]
+ *    source:    "db" | "mock" | "db-empty"
  *    timestamp: string  // ISO-8601
  *  }
  */
@@ -106,16 +109,41 @@ function toSignalInput(signal: Signal): SignalInput {
 // Route handler
 // ─────────────────────────────────────────────────────────────────────────────
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 export async function GET() {
   validateEnvironment(['DATABASE_URL']);
 
   // ── 1. Fetch latest signals ───────────────────────────────────────────────
   let raw: Signal[];
+  let source: 'db' | 'mock' | 'db-empty';
+
   try {
     raw = await getSignals(FETCH_LIMIT);
-    if (raw.length === 0) raw = MOCK_SIGNALS.slice(0, FETCH_LIMIT);
+
+    if (raw.length === 0) {
+      // Production: never serve mock data — surface the empty state explicitly
+      // so operators know the DB needs seeding rather than assuming mock is real.
+      if (IS_PRODUCTION) {
+        return NextResponse.json({
+          marketBias: 'NEUTRAL',
+          signals:    [],
+          source:     'db-empty',
+          timestamp:  new Date().toISOString(),
+        });
+      }
+      // Development: fall back to mock data so local work is unblocked.
+      raw    = MOCK_SIGNALS.slice(0, FETCH_LIMIT);
+      source = 'mock';
+    } else {
+      source = 'db';
+    }
   } catch {
-    raw = MOCK_SIGNALS.slice(0, FETCH_LIMIT);
+    // A query error in production surfaces as a 500 (thrown by dbQuery / getClient).
+    // In development, fall back to mock data.
+    if (IS_PRODUCTION) throw new Error('Failed to fetch signals from database.');
+    raw    = MOCK_SIGNALS.slice(0, FETCH_LIMIT);
+    source = 'mock';
   }
 
   // ── 2. Score each signal ──────────────────────────────────────────────────
@@ -145,6 +173,7 @@ export async function GET() {
   return NextResponse.json({
     marketBias,
     signals:   ranked,
+    source,
     timestamp: new Date().toISOString(),
   });
 }
