@@ -6,6 +6,7 @@
  */
 
 import { getSourceById } from '@/config/intelligenceSources';
+import { dbQuery } from '@/db/client';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -29,7 +30,7 @@ export interface RankedSignal {
 export interface RankingResult {
   /** Unified importance score clamped to 0–100 */
   importance_score: number;
-  /** Velocity score (0–100) reflecting how many co-entity signals appeared recently */
+  /** Velocity score (0–100) reflecting how quickly entities are appearing in the dataset */
   velocity_score: number;
 }
 
@@ -37,13 +38,46 @@ export interface RankingResult {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MS_24H = 24 * 60 * 60 * 1000;
-const MS_7D  =  7 * 24 * 60 * 60 * 1000;
+/** Raw velocity value that maps to 100 on the normalized scale */
+const VELOCITY_SATURATION = 100;
 
-/** Signals per 24 h that map to 100 % of the 24 h velocity contribution */
-const VELOCITY_24H_SATURATION = 3;
-/** Signals per 7 d that map to 100 % of the 7 d velocity contribution */
-const VELOCITY_7D_SATURATION  = 10;
+// ─────────────────────────────────────────────────────────────────────────────
+// Velocity helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Query the database to compute a velocity score for a set of entity names.
+ *
+ * Velocity = (count_24h * 0.6) + ((count_7d / 7) * 0.4), normalized to 0–100.
+ * Returns 0 when the entity list is empty or the database is unavailable.
+ */
+async function computeVelocityFromDB(entities: string[]): Promise<number> {
+  if (entities.length === 0) return 0;
+
+  const [row24h] = await dbQuery<{ count: string }>`
+    SELECT COUNT(*) AS count
+    FROM signal_entities se
+    JOIN signals s ON s.id = se.signal_id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ANY(${entities})
+      AND s.created_at > NOW() - INTERVAL '24 hours'
+  `;
+
+  const [row7d] = await dbQuery<{ count: string }>`
+    SELECT COUNT(*) AS count
+    FROM signal_entities se
+    JOIN signals s ON s.id = se.signal_id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ANY(${entities})
+      AND s.created_at > NOW() - INTERVAL '7 days'
+  `;
+
+  const count24h = parseInt(row24h?.count ?? '0', 10);
+  const count7d  = parseInt(row7d?.count  ?? '0', 10);
+
+  const raw = (count24h * 0.6) + ((count7d / 7) * 0.4);
+  return Math.min((raw / VELOCITY_SATURATION) * 100, 100);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core function
@@ -52,15 +86,12 @@ const VELOCITY_7D_SATURATION  = 10;
 /**
  * Compute a unified importance score for a single signal.
  *
- * @param signal      - The signal to score.
- * @param allSignals  - Full signal set used for velocity computation.
- *                      Pass an empty array (default) when no context is available.
- * @returns           { importance_score, velocity_score } both clamped to 0–100.
+ * @param signal - The signal to score.
+ * @returns      { importance_score, velocity_score } both clamped to 0–100.
  */
-export function computeSignalImportance(
+export async function computeSignalImportance(
   signal: RankedSignal,
-  allSignals: RankedSignal[] = [],
-): RankingResult {
+): Promise<RankingResult> {
 
   // 1. Source reliability — normalised to 0–100
   //    intelligenceSources reliabilityScore is 1–10; scale to 0–100.
@@ -73,33 +104,8 @@ export function computeSignalImportance(
   // 2. Entity weight — spec: min(entity_count, 5) * 5  →  range 0–25
   const entity_weight = Math.min(signal.entity_count, 5) * 5;
 
-  // 3. Velocity score — co-occurring signals within 24 h and 7 d
-  const signalEntities = signal.entities ?? [];
-  const signalTime     = new Date(signal.created_at).getTime();
-
-  let count24h = 0;
-  let count7d  = 0;
-
-  if (signalEntities.length > 0) {
-    for (const other of allSignals) {
-      if (other === signal) continue;
-
-      const otherEntities = other.entities ?? [];
-      const sharesEntity  = signalEntities.some((e) => otherEntities.includes(e));
-      if (!sharesEntity) continue;
-
-      const ageDiff = Math.abs(signalTime - new Date(other.created_at).getTime());
-      if (ageDiff <= MS_24H) count24h++;
-      if (ageDiff <= MS_7D)  count7d++;
-    }
-  }
-
-  // Weighted combination: 60 % weight to 24 h density, 40 % to 7 d density
-  const velocity_score = Math.min(
-    (count24h / VELOCITY_24H_SATURATION) * 60 +
-    (count7d  / VELOCITY_7D_SATURATION)  * 40,
-    100,
-  );
+  // 3. Velocity score — derived from database history across all signals
+  const velocity_score = await computeVelocityFromDB(signal.entities ?? []);
 
   // 4. Composite importance score
   const raw_importance =

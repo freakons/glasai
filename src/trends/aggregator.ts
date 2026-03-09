@@ -18,7 +18,6 @@ function toRankedSignal(signal: TrendSignal): RankedSignal {
 }
 
 export async function aggregateTrends(signals: TrendSignal[]): Promise<TrendResult[]> {
-  // Pre-convert all signals once so the ranking engine can use them as velocity context.
   const rankedSignals = signals.map(toRankedSignal);
 
   // entity name → { count, importance_score sum, velocity_score sum, categories, related entities }
@@ -35,7 +34,7 @@ export async function aggregateTrends(signals: TrendSignal[]): Promise<TrendResu
     const rankedSignal = rankedSignals[i];
     const names        = signal.entities.map((e) => e.name);
 
-    const { importance_score, velocity_score } = computeSignalImportance(rankedSignal, rankedSignals);
+    const { importance_score, velocity_score } = await computeSignalImportance(rankedSignal);
 
     for (const name of names) {
       if (!entityFreq.has(name)) {
