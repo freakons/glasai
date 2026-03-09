@@ -1,7 +1,21 @@
 import { NormalizedSignal } from './types';
 import { IntelligenceResult } from '@/intelligence/types';
 
-const INGEST_URL = process.env.INGEST_URL ?? 'http://localhost:3000/api/intelligence/ingest';
+/**
+ * Resolve the ingest endpoint URL.
+ *
+ * Priority:
+ *   1. INGEST_URL env var (explicit override)
+ *   2. VERCEL_URL (set automatically by Vercel on every deployment)
+ *   3. NEXT_PUBLIC_APP_URL (explicit app URL for custom domains)
+ *   4. localhost fallback for local development
+ */
+function getIngestUrl(): string {
+  if (process.env.INGEST_URL) return process.env.INGEST_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/api/intelligence/ingest`;
+  if (process.env.NEXT_PUBLIC_APP_URL) return `${process.env.NEXT_PUBLIC_APP_URL}/api/intelligence/ingest`;
+  return 'http://localhost:3000/api/intelligence/ingest';
+}
 
 export async function sendSignal(
   signal: NormalizedSignal,
@@ -19,9 +33,10 @@ export async function sendSignal(
     confidence: intelligence?.confidence ?? 50,
   };
 
+  const ingestUrl = getIngestUrl();
   let res: Response;
   try {
-    res = await fetch(INGEST_URL, {
+    res = await fetch(ingestUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

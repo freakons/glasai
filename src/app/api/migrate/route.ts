@@ -155,6 +155,56 @@ const STATEMENTS = [
     recorded_at  TIMESTAMP DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_trend_timeseries_topic_time ON trend_timeseries(topic, recorded_at DESC)`,
+
+  // ── Trends (aggregated trend snapshots) ──────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS trends (
+    id               SERIAL PRIMARY KEY,
+    topic            TEXT NOT NULL,
+    direction        TEXT CHECK (direction IN ('rising','falling','stable')),
+    score            NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    signal_count     INT           NOT NULL DEFAULT 0,
+    summary          TEXT,
+    category         TEXT,
+    entities         JSONB,
+    confidence       NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    importance_score NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    velocity_score   NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_trends_topic      ON trends (topic)`,
+  `CREATE INDEX        IF NOT EXISTS idx_trends_created_at ON trends (created_at DESC)`,
+  // Backfill any columns missing from a pre-existing trends table
+  `ALTER TABLE trends ADD COLUMN IF NOT EXISTS category         TEXT`,
+  `ALTER TABLE trends ADD COLUMN IF NOT EXISTS entities         JSONB`,
+  `ALTER TABLE trends ADD COLUMN IF NOT EXISTS confidence       NUMERIC(5,2) NOT NULL DEFAULT 0`,
+  `ALTER TABLE trends ADD COLUMN IF NOT EXISTS importance_score NUMERIC(5,2) NOT NULL DEFAULT 0`,
+  `ALTER TABLE trends ADD COLUMN IF NOT EXISTS velocity_score   NUMERIC(5,2) NOT NULL DEFAULT 0`,
+
+  // ── Insights (AI-generated narrative summaries from trends) ──────────────
+  `CREATE TABLE IF NOT EXISTS insights (
+    id         SERIAL PRIMARY KEY,
+    title      TEXT          NOT NULL,
+    summary    TEXT          NOT NULL DEFAULT '',
+    category   TEXT,
+    topics     JSONB,
+    confidence NUMERIC(5,2)  NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_title      ON insights (title)`,
+  `CREATE INDEX        IF NOT EXISTS idx_insights_created_at ON insights (created_at DESC)`,
+
+  // ── Pipeline runs (health monitoring) ────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id                SERIAL PRIMARY KEY,
+    stage             TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('ok','error','partial')),
+    duration_ms       INT,
+    ingested          INT,
+    signals_generated INT,
+    error_msg         TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_created_at ON pipeline_runs (created_at DESC)`,
 ];
 
 /** Table names that are created (or verified) by the migration. */
@@ -168,6 +218,9 @@ const TABLES_CREATED = [
   'signal_entities',
   'access_requests',
   'trend_timeseries',
+  'trends',
+  'insights',
+  'pipeline_runs',
 ];
 
 export async function POST(req: NextRequest) {

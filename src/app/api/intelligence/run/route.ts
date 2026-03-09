@@ -87,7 +87,9 @@ export async function POST(req: NextRequest) {
   const reqId = createRequestId();
 
   // Validate critical env vars (throws HTTP 500 in production if missing)
-  validateEnvironment(['DATABASE_URL', 'CRON_SECRET', 'GNEWS_API_KEY']);
+  // NOTE: GNEWS_API_KEY is NOT required here — the harvester also uses RSS, GitHub,
+  // and Arxiv sources that work without it. Missing GNews is handled gracefully inside runHarvester.
+  validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
 
   // Warn (not throw) if no LLM provider is configured
   checkLLMProvider();
@@ -104,46 +106,52 @@ export async function POST(req: NextRequest) {
 
   // ── Stage 1: Harvester ────────────────────────────────────────────────────
   const t1 = Date.now();
+  console.log('pipeline stage: harvester started');
   try {
     await runHarvester();
     const d = Date.now() - t1;
     stages.push({ stage: 'harvester', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=harvester status=ok ms=${d}`);
+    console.log('pipeline stage: harvester completed');
   } catch (err) {
     const d = Date.now() - t1;
     const msg = String(err);
     stages.push({ stage: 'harvester', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] harvester failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: harvester failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
   // ── Stage 2: Trend Analysis ───────────────────────────────────────────────
   const t2 = Date.now();
+  console.log('pipeline stage: trend analysis started');
   try {
     await runTrendAnalysis();
     const d = Date.now() - t2;
     stages.push({ stage: 'trends', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=trends status=ok ms=${d}`);
+    console.log('pipeline stage: trend analysis completed');
   } catch (err) {
     const d = Date.now() - t2;
     const msg = String(err);
     stages.push({ stage: 'trends', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] trend analysis failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: trend analysis failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
   // ── Stage 3: Insight Generation ───────────────────────────────────────────
   const t3 = Date.now();
+  console.log('pipeline stage: insight generation started');
   try {
     await runInsightGeneration();
     const d = Date.now() - t3;
     stages.push({ stage: 'insights', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=insights status=ok ms=${d}`);
+    console.log('pipeline stage: insight generation completed');
   } catch (err) {
     const d = Date.now() - t3;
     const msg = String(err);
     stages.push({ stage: 'insights', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] insight generation failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: insight generation failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
@@ -162,12 +170,36 @@ export async function POST(req: NextRequest) {
     error_msg: anyError ? stages.filter((s) => s.error).map((s) => s.stage).join(',') : undefined,
   });
 
+  // ── Post-run diagnostics ──────────────────────────────────────────────────
+  let signalDiagnostics: {
+    totalSignals: number | string;
+    latestSignal: Record<string, unknown> | null;
+  } = { totalSignals: 'unknown', latestSignal: null };
+
+  try {
+    const countRows  = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`;
+    const sampleRows = await dbQuery<Record<string, unknown>>`
+      SELECT id, title, status, category, confidence, trust_score, created_at
+      FROM signals
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    signalDiagnostics = {
+      totalSignals: parseInt(countRows[0]?.count ?? '0', 10),
+      latestSignal: sampleRows[0] ?? null,
+    };
+    console.log(`[intelligence/run] post-run diagnostics: totalSignals=${signalDiagnostics.totalSignals}`);
+  } catch (err) {
+    console.warn('[intelligence/run] diagnostics query failed:', err);
+  }
+
   return NextResponse.json({
     ok:      !anyError,
     status:  overallStatus,
     stages,
     totalMs,
     timestamp: new Date().toISOString(),
+    diagnostics: signalDiagnostics,
   }, {
     // Return 207 Multi-Status when some stages failed but others succeeded
     status: anyError ? 207 : 200,
