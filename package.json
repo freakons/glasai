@@ -7,10 +7,10 @@
         "dev": "next dev",
         "build": "next build",
         "start": "next start",
-        "lint": "next lint",
+        "lint": "eslint src/",
         "typecheck": "tsc --noEmit",
         "build:check": "npm run typecheck && next build",
-        "lint:check": "next lint"
+        "lint:check": "eslint src/"
     },
     "repository": {
         "type": "git",
@@ -34,7 +34,10 @@
         "rss-parser": "^3.13.0"
     },
     "devDependencies": {
+        "@eslint/eslintrc": "^3.3.5",
         "@tailwindcss/postcss": "^4.2.1",
+        "eslint": "^9.39.4",
+        "eslint-config-next": "^16.1.6",
         "postcss": "^8.5.8",
         "tailwindcss": "^4.2.1",
         "typescript": "5.9.3"

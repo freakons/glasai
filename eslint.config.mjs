@@ -1,0 +1,11 @@
+import nextConfig from "eslint-config-next";
+
+export default [
+  ...nextConfig,
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/consistent-type-imports": "warn",
+    },
+  },
+];
