@@ -3,6 +3,7 @@ import { NextRequest, NextResponse }                    from 'next/server';
 import { validateEnvironment }                           from '@/lib/env';
 import { createRequestId, logWithRequestId }             from '@/lib/requestId';
 import { runPipelineSafe }                               from '@/lib/pipelineTrigger';
+import { enqueue }                                       from '@/lib/queue';
 import { recordPipelineRun }                             from '@/lib/pipelineHealth';
 import { ingestGNews }                                  from '@/services/ingestion/gnewsFetcher';
 import { getRecentEvents }                              from '@/services/storage/eventStore';
@@ -51,7 +52,9 @@ export async function POST(req: NextRequest) {
     `ingested=${ingested} events=${events.length} signals=${signalsGenerated}`,
   );
 
-  await runPipelineSafe();
+  await enqueue(async () => {
+    await runPipelineSafe();
+  });
 
   return Response.json({
     status:  'ok',

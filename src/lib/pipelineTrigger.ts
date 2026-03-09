@@ -19,6 +19,8 @@
  *   triggerPipelineOnce(); // fire-and-forget, safe to call on every request
  */
 
+import { enqueue } from '@/lib/queue';
+
 // Heavy service modules are imported dynamically inside runPipeline() so they
 // are excluded from the bundle of any route that imports this module at the
 // top level (e.g. /api/opportunities).  The import() calls resolve instantly
@@ -63,7 +65,9 @@ export function triggerPipelineOnce(): void {
   // see the updated timestamp before the async work begins.
   lastTriggeredAt = now;
 
-  void runPipelineSafe();
+  void enqueue(async () => {
+    await runPipelineSafe();
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
