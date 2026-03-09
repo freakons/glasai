@@ -1,9 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { mockGraphData } from '@/data/mockGraph';
-import type { GraphNode } from '@/data/mockGraph';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { mockGraphData, type GraphNode, type GraphData } from '@/data/mockGraph';
+import type { EntityProfile } from '@/data/mockEntities';
 
 // Disable SSR — ForceGraph2D uses canvas and window APIs
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,22 +27,78 @@ function nodeId(n: string | RuntimeNode): string {
   return typeof n === 'object' ? n.id : n;
 }
 
+/** Build graph data from entity profiles (entity nodes only, no links). */
+function buildGraphFromEntities(entities: EntityProfile[]): GraphData {
+  if (entities.length === 0) return mockGraphData;
+
+  const nodes: GraphNode[] = entities.map(e => ({
+    id:    e.id,
+    type:  'entity' as const,
+    label: e.name,
+  }));
+
+  // Connect entities in the same sector
+  const links: { source: string; target: string }[] = [];
+  const bySector: Record<string, string[]> = {};
+  for (const e of entities) {
+    if (e.sector) {
+      bySector[e.sector] = bySector[e.sector] ?? [];
+      bySector[e.sector].push(e.id);
+    }
+  }
+  for (const ids of Object.values(bySector)) {
+    for (let i = 0; i < ids.length - 1; i++) {
+      links.push({ source: ids[i], target: ids[i + 1] });
+    }
+  }
+
+  return { nodes, links };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data fetching
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function fetchGraphData(): Promise<GraphData> {
+  try {
+    const res = await fetch('/api/entities', { next: { revalidate: 120 } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data.entities) && data.entities.length > 0) {
+      return buildGraphFromEntities(data.entities as EntityProfile[]);
+    }
+    return mockGraphData;
+  } catch {
+    return mockGraphData;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function IntelligenceGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [graphData, setGraphData] = useState<GraphData>(mockGraphData);
+
+  // Fetch entity graph data on mount; silently keep mock data if it fails
+  useEffect(() => {
+    fetchGraphData().then(setGraphData);
+  }, []);
 
   /** Set of node IDs connected to the hovered node */
   const neighbors = useMemo<Set<string>>(() => {
     if (!hoveredId) return new Set();
     const s = new Set<string>();
-    for (const link of mockGraphData.links) {
+    for (const link of graphData.links) {
       const src = nodeId(link.source as string | RuntimeNode);
       const tgt = nodeId(link.target as string | RuntimeNode);
       if (src === hoveredId) s.add(tgt);
       if (tgt === hoveredId) s.add(src);
     }
     return s;
-  }, [hoveredId]);
+  }, [hoveredId, graphData.links]);
 
   /** Custom canvas renderer — draws glowing nodes with labels */
   const paintNode = useCallback(
@@ -125,7 +181,7 @@ export function IntelligenceGraph() {
       style={{ width: '100%', height: '100%', minHeight: 600 }}
     >
       <ForceGraph2D
-        graphData={mockGraphData}
+        graphData={graphData}
         backgroundColor="transparent"
         nodeCanvasObject={paintNode}
         nodeCanvasObjectMode={() => 'replace'}
