@@ -127,9 +127,33 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_access_requests_created_at ON access_requests (created_at DESC)`,
 ];
 
+/** Table names that are created (or verified) by the migration. */
+const TABLES_CREATED = [
+  'articles',
+  'intelligence_events',
+  'snapshots',
+  'signals',
+  'events',
+  'entities',
+  'access_requests',
+];
+
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret') || new URL(req.url).searchParams.get('secret') || '';
-  if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+  const url = new URL(req.url);
+
+  // Accept either ADMIN_SECRET (via ?key=) or CRON_SECRET (via ?secret= / x-cron-secret header)
+  const keyParam    = url.searchParams.get('key')    || '';
+  const secretParam = url.searchParams.get('secret') || '';
+  const cronHeader  = req.headers.get('x-cron-secret') || '';
+
+  const adminSecret = process.env.ADMIN_SECRET || '';
+  const cronSecret  = process.env.CRON_SECRET  || '';
+
+  const authorizedByAdmin = adminSecret !== '' && keyParam === adminSecret;
+  const authorizedByCron  = cronSecret  !== '' && (secretParam === cronSecret || cronHeader === cronSecret);
+
+  // If either secret is configured, at least one must match
+  if ((adminSecret !== '' || cronSecret !== '') && !authorizedByAdmin && !authorizedByCron) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -140,17 +164,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const sql = neon(dbUrl);
-    const results: string[] = [];
 
     for (const stmt of STATEMENTS) {
       await sql(stmt);
-      results.push('ok');
     }
 
     return NextResponse.json({
-      ok: true,
-      message: 'Migration complete',
-      statements: results.length,
+      ok:             true,
+      message:        'Migration complete',
+      statements:     STATEMENTS.length,
+      tables_created: TABLES_CREATED,
     });
   } catch (err) {
     console.error('[migrate] error:', err);
