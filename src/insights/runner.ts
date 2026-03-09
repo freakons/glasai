@@ -2,6 +2,7 @@ import { dbQuery } from '@/db/client';
 import { TrendResult } from '@/trends/types';
 import { Insight } from './types';
 import { generateInsights } from './generator';
+import { generateDigest } from './digest';
 
 // ── Row type returned by the trends query ─────────────────────────────────────
 
@@ -110,6 +111,10 @@ export async function runInsightGeneration(): Promise<void> {
       `  Confidence: ${insight.confidence}`,
     );
   }
+
+  const digest = generateDigest(insights);
+  console.log('\n');
+  console.log(digest);
 
   try {
     await storeInsights(insights);
