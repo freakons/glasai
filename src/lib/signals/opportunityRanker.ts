@@ -13,15 +13,16 @@ import type { TrendDirection } from './signalScore';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SignalCandidate {
-  symbol:      string;
-  score:       number;
-  direction:   TrendDirection;
-  velocity:    number;
-  volumeSpike: boolean;
+  symbol:       string;
+  score:        number;
+  direction:    TrendDirection;
+  velocity?:    number;
+  volumeSpike?: boolean;
 }
 
 export interface RankedOpportunity extends SignalCandidate {
-  rank: number;
+  rank:      number;
+  timestamp: number;
 }
 
 export interface RankOptions {
@@ -57,8 +58,8 @@ const DEFAULT_LIMIT = 20;
  *   { symbol: "SOLUSDT",  score: 91, direction: "UP",   velocity: 3.1, volumeSpike: true  },
  *   { symbol: "ETHUSDT",  score: 72, direction: "DOWN", velocity: 0.9, volumeSpike: false },
  * ]);
- * // ranked[0] → { rank: 1, symbol: "SOLUSDT", score: 91, … }
- * // ranked[1] → { rank: 2, symbol: "BTCUSDT", score: 87, … }
+ * // ranked[0] → { rank: 1, symbol: "SOLUSDT", score: 91, timestamp: <ms>, … }
+ * // ranked[1] → { rank: 2, symbol: "BTCUSDT", score: 87, timestamp: <ms>, … }
  */
 export function rankOpportunities(
   signals: SignalCandidate[],
@@ -68,6 +69,9 @@ export function rankOpportunities(
 
   if (signals.length === 0) return [];
 
+  // Snapshot timestamp once per call so all results share the same instant.
+  const timestamp = Date.now();
+
   // Shallow copy to avoid mutating caller's array, then sort descending by score.
   // Ties are broken by symbol (alphabetical) for deterministic ordering.
   const sorted = signals
@@ -76,10 +80,10 @@ export function rankOpportunities(
 
   const top = sorted.length > limit ? sorted.slice(0, limit) : sorted;
 
-  // Assign 1-based rank inline — avoids a second map pass.
+  // Assign 1-based rank and shared timestamp inline — avoids a second map pass.
   const result: RankedOpportunity[] = new Array(top.length);
   for (let i = 0; i < top.length; i++) {
-    result[i] = { ...top[i], rank: i + 1 };
+    result[i] = { ...top[i], rank: i + 1, timestamp };
   }
 
   return result;
