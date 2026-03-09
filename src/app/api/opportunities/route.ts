@@ -33,6 +33,7 @@ export const runtime = 'nodejs';
 import { NextResponse }          from 'next/server';
 import { validateEnvironment }   from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
 import { broadcastOpportunity }  from '@/server/opportunitySocket';
 import { triggerPipelineOnce }   from '@/lib/pipelineTrigger';
 import { getSignals }            from '@/db/queries';
@@ -115,12 +116,20 @@ function toSignalInput(signal: Signal): SignalInput {
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30' };
+const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60' };
+const REDIS_KEY = 'signals:marketPulse';
 
 export async function GET() {
   const t0 = Date.now();
   const reqId = createRequestId();
   validateEnvironment(['DATABASE_URL']);
+
+  // ── 0. Redis cache check ────────────────────────────────────────────────
+  const redisCached = await redisGet(REDIS_KEY);
+  if (redisCached) {
+    logWithRequestId(reqId, 'opportunities', `cache_hit source=redis ms=${Date.now() - t0}`);
+    return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+  }
 
   // ── 1. Fetch latest signals ───────────────────────────────────────────────
   let raw: Signal[];
@@ -135,10 +144,10 @@ export async function GET() {
       // will pick up real data once ingestion completes.
       if (IS_PRODUCTION) {
         triggerPipelineOnce(); // fire-and-forget, cooldown-gated
-        logWithRequestId(reqId, 'opportunities', `db-empty — pipeline triggered ms=${Date.now() - t0}`);
+        logWithRequestId(reqId, 'opportunities', `cache_miss db-empty — pipeline triggered ms=${Date.now() - t0}`);
         return NextResponse.json(
           { marketBias: 'NEUTRAL', signals: [], source: 'db-empty', timestamp: new Date().toISOString() },
-          { headers: CACHE_HEADERS },
+          { headers: { ...CACHE_HEADERS, 'x-source': 'empty' } },
         );
       }
       // Development: fall back to mock data so local work is unblocked.
@@ -179,10 +188,12 @@ export async function GET() {
   const { bias: marketBias } = computeMarketPulse(ranked);
 
   // ── 5. Respond ────────────────────────────────────────────────────────────
+  const payload = { marketBias, signals: ranked, source, timestamp: new Date().toISOString() };
   broadcastOpportunity({ type: 'opportunity_update', data: ranked });
-  logWithRequestId(reqId, 'opportunities', `source=${source} signals=${ranked.length} ms=${Date.now() - t0}`);
-  return NextResponse.json(
-    { marketBias, signals: ranked, source, timestamp: new Date().toISOString() },
-    { headers: CACHE_HEADERS },
-  );
+
+  // Store in Redis for subsequent requests
+  await redisSet(REDIS_KEY, payload, TTL.SIGNALS);
+
+  logWithRequestId(reqId, 'opportunities', `cache_miss source=${source} signals=${ranked.length} ms=${Date.now() - t0}`);
+  return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': source } });
 }

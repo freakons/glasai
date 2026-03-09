@@ -21,6 +21,21 @@
  *   AI_PROVIDER=openai  → requires OPENAI_API_KEY
  *   AI_PROVIDER=ollama  → requires local Ollama at http://localhost:11434
  *   (unset)             → auto-detect: Ollama → Grok → OpenAI
+ *
+ * Recommended API Key Setup
+ * ─────────────────────────
+ *   Upstash Redis:
+ *     Display name : "Omterminal Production Cache"
+ *     Expiry       : 6 months
+ *     Variables    : UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+ *
+ *   Grok (xAI):
+ *     Display name : "Omterminal Intelligence Engine"
+ *     Expiry       : 6 months
+ *     Variable     : GROK_API_KEY
+ *
+ *   OpenAI (fallback):
+ *     Variable     : OPENAI_API_KEY
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,9 +52,11 @@ export const CRITICAL_VARS = [
 
 /** Variables that are optional but emit warnings when absent. */
 export const OPTIONAL_VARS = [
-  'GROK_API_KEY',    // LLM: Grok provider (xAI)
-  'OPENAI_API_KEY',  // LLM: OpenAI provider (fallback)
-  'RESEND_KEY',      // Email: digest & waitlist
+  'UPSTASH_REDIS_REST_URL',   // Cache: Upstash Redis endpoint
+  'UPSTASH_REDIS_REST_TOKEN', // Cache: Upstash Redis token
+  'GROK_API_KEY',             // LLM: Grok provider (xAI)
+  'OPENAI_API_KEY',           // LLM: OpenAI provider (fallback)
+  'RESEND_KEY',               // Email: digest & waitlist
 ] as const;
 
 export type CriticalVar = (typeof CRITICAL_VARS)[number];

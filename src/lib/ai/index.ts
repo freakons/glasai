@@ -2,11 +2,25 @@ import type { AIProvider } from './provider';
 import { OpenAIProvider } from './openai';
 import { OllamaProvider } from './ollama';
 import { GrokProvider } from './grok';
+import { CachedAIProvider } from './cachedProvider';
 
 export type { AIProvider } from './provider';
 export { GrokProvider } from './grok';
 
 let _provider: AIProvider | null = null;
+
+/** The name of the currently active provider (set during getProvider). */
+let _activeProviderName: string | null = null;
+
+/** Returns the name of the currently active LLM provider, or null if not yet resolved. */
+export function getActiveProviderName(): string | null {
+  return _activeProviderName;
+}
+
+function wrapWithCache(provider: AIProvider, name: string): AIProvider {
+  _activeProviderName = name;
+  return new CachedAIProvider(provider, name);
+}
 
 export async function getProvider(): Promise<AIProvider> {
   if (_provider) return _provider;
@@ -15,37 +29,37 @@ export async function getProvider(): Promise<AIProvider> {
 
   if (env === 'openai') {
     if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
-    _provider = new OpenAIProvider(process.env.OPENAI_API_KEY);
+    _provider = wrapWithCache(new OpenAIProvider(process.env.OPENAI_API_KEY), 'openai');
     return _provider;
   }
 
   if (env === 'ollama') {
-    _provider = new OllamaProvider();
+    _provider = wrapWithCache(new OllamaProvider(), 'ollama');
     return _provider;
   }
 
   if (env === 'grok') {
     if (!process.env.GROK_API_KEY) throw new Error('GROK_API_KEY is required when AI_PROVIDER=grok');
-    _provider = new GrokProvider(process.env.GROK_API_KEY);
+    _provider = wrapWithCache(new GrokProvider(process.env.GROK_API_KEY), 'grok');
     return _provider;
   }
 
   // Default probe order: Ollama (local) → Grok → OpenAI
   if (await OllamaProvider.isAvailable()) {
     console.log('[ai/index] provider=ollama (auto-detected)');
-    _provider = new OllamaProvider();
+    _provider = wrapWithCache(new OllamaProvider(), 'ollama');
     return _provider;
   }
 
   if (process.env.GROK_API_KEY) {
     console.log('[ai/index] provider=grok (auto-detected)');
-    _provider = new GrokProvider(process.env.GROK_API_KEY);
+    _provider = wrapWithCache(new GrokProvider(process.env.GROK_API_KEY), 'grok');
     return _provider;
   }
 
   if (process.env.OPENAI_API_KEY) {
     console.log('[ai/index] provider=openai (auto-detected)');
-    _provider = new OpenAIProvider(process.env.OPENAI_API_KEY);
+    _provider = wrapWithCache(new OpenAIProvider(process.env.OPENAI_API_KEY), 'openai');
     return _provider;
   }
 
