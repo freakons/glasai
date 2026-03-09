@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import MOCK_SIGNALS, { type Signal, type SignalCategory } from '@/data/mockSignals';
 import { CommandBar } from '@/ui/layout/CommandBar';
 
@@ -47,6 +47,24 @@ function formatDate(iso: string): string {
     });
   } catch {
     return iso;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data fetching
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function fetchSignals(): Promise<Signal[]> {
+  try {
+    const res = await fetch('/api/signals', { next: { revalidate: 60 } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data.signals) && data.signals.length > 0) {
+      return data.signals as Signal[];
+    }
+    return MOCK_SIGNALS;
+  } catch {
+    return MOCK_SIGNALS;
   }
 }
 
@@ -123,23 +141,23 @@ function SignalItem({ signal }: { signal: Signal }) {
 // Category stats banner
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SignalStats() {
-  const counts = MOCK_SIGNALS.reduce<Record<string, number>>((acc, s) => {
+function SignalStats({ signals }: { signals: Signal[] }) {
+  const counts = signals.reduce<Record<string, number>>((acc, s) => {
     acc[s.category] = (acc[s.category] ?? 0) + 1;
     return acc;
   }, {});
 
-  const avgConf = Math.round(
-    MOCK_SIGNALS.reduce((sum, s) => sum + s.confidence, 0) / MOCK_SIGNALS.length,
-  );
+  const avgConf = signals.length > 0
+    ? Math.round(signals.reduce((sum, s) => sum + s.confidence, 0) / signals.length)
+    : 0;
 
   return (
     <div className="stats-row" style={{ marginBottom: 20 }}>
       {[
-        { n: String(MOCK_SIGNALS.length), l: 'Total Signals', glow: 'rgba(79,70,229,0.4)', color: 'var(--indigo-l)' },
+        { n: String(signals.length),         l: 'Total Signals',  glow: 'rgba(79,70,229,0.4)',  color: 'var(--indigo-l)'  },
         { n: String(counts.models ?? 0),     l: 'Model Signals',  glow: 'rgba(124,58,237,0.4)', color: 'var(--violet-l)' },
-        { n: String(counts.funding ?? 0),    l: 'Funding Signals',glow: 'rgba(217,119,6,0.4)',  color: 'var(--amber-l)' },
-        { n: String(counts.regulation ?? 0), l: 'Regulation',     glow: 'rgba(225,29,72,0.4)',  color: 'var(--rose-l)' },
+        { n: String(counts.funding ?? 0),    l: 'Funding Signals',glow: 'rgba(217,119,6,0.4)',  color: 'var(--amber-l)'  },
+        { n: String(counts.regulation ?? 0), l: 'Regulation',     glow: 'rgba(225,29,72,0.4)',  color: 'var(--rose-l)'   },
         { n: `${avgConf}%`, l: 'Avg Confidence', glow: 'rgba(5,150,105,0.4)', color: 'var(--emerald-l)' },
       ].map(({ n, l, glow, color }) => (
         <div key={l} style={{
@@ -177,14 +195,20 @@ function SignalStats() {
 
 export function SignalsBrowser() {
   const [active, setActive] = useState<'all' | SignalCategory>('all');
+  const [signals, setSignals] = useState<Signal[]>(MOCK_SIGNALS);
+
+  // Fetch from API on mount; silently keep mock data if it fails
+  useEffect(() => {
+    fetchSignals().then(setSignals);
+  }, []);
 
   const filtered = active === 'all'
-    ? MOCK_SIGNALS
-    : MOCK_SIGNALS.filter((s) => s.category === active);
+    ? signals
+    : signals.filter((s) => s.category === active);
 
   return (
     <>
-      <SignalStats />
+      <SignalStats signals={signals} />
 
       {/* Category filters */}
       <div className="filters">
@@ -202,7 +226,7 @@ export function SignalsBrowser() {
                 fontSize: 9,
                 opacity: 0.6,
               }}>
-                {MOCK_SIGNALS.filter((s) => s.category === key).length}
+                {signals.filter((s) => s.category === key).length}
               </span>
             )}
           </button>
