@@ -19,6 +19,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
+import { createRequestId, logWithRequestId } from '@/lib/requestId';
 import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
@@ -31,6 +32,7 @@ const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30'
 
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
+  const reqId = createRequestId();
   validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
 
   const { searchParams } = new URL(req.url);
@@ -51,7 +53,7 @@ export async function GET(req: NextRequest) {
       const dbSignals = await getSignals(limit);
 
       if (dbSignals.length > 0) {
-        console.log(`[signals] source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
+        logWithRequestId(reqId, 'signals', `source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
         return NextResponse.json(
           { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length },
           { headers: CACHE_HEADERS },
@@ -60,7 +62,7 @@ export async function GET(req: NextRequest) {
 
       // Empty DB — fall back to mock data
       const signals = MOCK_SIGNALS.slice(0, limit);
-      console.log(`[signals] source=mock signals=${signals.length} ms=${Date.now() - t0}`);
+      logWithRequestId(reqId, 'signals', `source=mock signals=${signals.length} ms=${Date.now() - t0}`);
       return NextResponse.json(
         { ok: true, source: 'mock', signals, count: signals.length },
         { headers: CACHE_HEADERS },
