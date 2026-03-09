@@ -13,12 +13,20 @@ import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connection
+//
+// Uses globalThis so the client survives HMR reloads in development and is
+// shared across module re-evaluations within the same Node.js process.
+// On Vercel each serverless function instance is a single process, so this
+// gives one persistent connection per instance — no reconnect overhead.
 // ─────────────────────────────────────────────────────────────────────────────
 
-let _sql: NeonQueryFunction<false, false> | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var __neonSql: NeonQueryFunction<false, false> | undefined;
+}
 
 function getClient(): NeonQueryFunction<false, false> | null {
-  if (_sql) return _sql;
+  if (globalThis.__neonSql) return globalThis.__neonSql;
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error(
@@ -28,8 +36,8 @@ function getClient(): NeonQueryFunction<false, false> | null {
     console.warn('[db/client] DATABASE_URL is not set — database operations will be skipped.');
     return null;
   }
-  _sql = neon(process.env.DATABASE_URL);
-  return _sql;
+  globalThis.__neonSql = neon(process.env.DATABASE_URL);
+  return globalThis.__neonSql;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

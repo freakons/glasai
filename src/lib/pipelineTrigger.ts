@@ -19,10 +19,10 @@
  *   triggerPipelineOnce(); // fire-and-forget, safe to call on every request
  */
 
-import { ingestGNews }              from '@/services/ingestion/gnewsFetcher';
-import { getRecentEvents }          from '@/services/storage/eventStore';
-import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
-import { saveSignals }              from '@/services/storage/signalStore';
+// Heavy service modules are imported dynamically inside runPipeline() so they
+// are excluded from the bundle of any route that imports this module at the
+// top level (e.g. /api/opportunities).  The import() calls resolve instantly
+// from the module cache on subsequent invocations within the same instance.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cooldown state
@@ -69,6 +69,13 @@ export function triggerPipelineOnce(): void {
 
 async function runPipeline(): Promise<void> {
   try {
+    // Dynamic imports keep these heavy modules out of the /api/opportunities
+    // bundle — they are only loaded when this function actually executes.
+    const { ingestGNews }              = await import('@/services/ingestion/gnewsFetcher');
+    const { getRecentEvents }          = await import('@/services/storage/eventStore');
+    const { generateSignalsFromEvents } = await import('@/services/signals/signalEngine');
+    const { saveSignals }              = await import('@/services/storage/signalStore');
+
     const { ingested }     = await ingestGNews();
     const events           = await getRecentEvents(500);
     const signals          = generateSignalsFromEvents(events);

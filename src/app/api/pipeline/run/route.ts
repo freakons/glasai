@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 import { NextRequest, NextResponse }                    from 'next/server';
 import { validateEnvironment }                           from '@/lib/env';
 import { ingestGNews }                                  from '@/services/ingestion/gnewsFetcher';

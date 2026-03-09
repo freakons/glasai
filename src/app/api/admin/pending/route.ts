@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 /**
  * GET /api/admin/pending
  *

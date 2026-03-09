@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 /**
  * Omterminal — Signals API Route
  *
@@ -26,7 +27,10 @@ import { MOCK_SIGNALS } from '@/data/mockSignals';
 
 export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for larger event lookbacks
 
+const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30' };
+
 export async function GET(req: NextRequest) {
+  const t0 = Date.now();
   validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
 
   const { searchParams } = new URL(req.url);
@@ -47,31 +51,27 @@ export async function GET(req: NextRequest) {
       const dbSignals = await getSignals(limit);
 
       if (dbSignals.length > 0) {
-        return NextResponse.json({
-          ok:      true,
-          source:  'db',
-          signals: dbSignals,
-          count:   dbSignals.length,
-        });
+        console.log(`[signals] source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
+        return NextResponse.json(
+          { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length },
+          { headers: CACHE_HEADERS },
+        );
       }
 
       // Empty DB — fall back to mock data
       const signals = MOCK_SIGNALS.slice(0, limit);
-      return NextResponse.json({
-        ok:      true,
-        source:  'mock',
-        signals,
-        count:   signals.length,
-      });
+      console.log(`[signals] source=mock signals=${signals.length} ms=${Date.now() - t0}`);
+      return NextResponse.json(
+        { ok: true, source: 'mock', signals, count: signals.length },
+        { headers: CACHE_HEADERS },
+      );
     } catch (err) {
       console.error('[api/signals] frontend fetch error:', err);
       const signals = MOCK_SIGNALS.slice(0, limit);
-      return NextResponse.json({
-        ok:      true,
-        source:  'mock',
-        signals,
-        count:   signals.length,
-      });
+      return NextResponse.json(
+        { ok: true, source: 'mock', signals, count: signals.length },
+        { headers: CACHE_HEADERS },
+      );
     }
   }
 

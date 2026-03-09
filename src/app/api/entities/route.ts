@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 /**
  * Omterminal — Entities API Route
  *

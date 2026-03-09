@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 /**
  * Omterminal — Opportunities API
  *
@@ -112,7 +113,10 @@ function toSignalInput(signal: Signal): SignalInput {
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+const CACHE_HEADERS = { 'Cache-Control': 's-maxage=5, stale-while-revalidate=30' };
+
 export async function GET() {
+  const t0 = Date.now();
   validateEnvironment(['DATABASE_URL']);
 
   // ── 1. Fetch latest signals ───────────────────────────────────────────────
@@ -128,12 +132,11 @@ export async function GET() {
       // will pick up real data once ingestion completes.
       if (IS_PRODUCTION) {
         triggerPipelineOnce(); // fire-and-forget, cooldown-gated
-        return NextResponse.json({
-          marketBias: 'NEUTRAL',
-          signals:    [],
-          source:     'db-empty',
-          timestamp:  new Date().toISOString(),
-        });
+        console.log(`[opportunities] db-empty — pipeline triggered ms=${Date.now() - t0}`);
+        return NextResponse.json(
+          { marketBias: 'NEUTRAL', signals: [], source: 'db-empty', timestamp: new Date().toISOString() },
+          { headers: CACHE_HEADERS },
+        );
       }
       // Development: fall back to mock data so local work is unblocked.
       raw    = MOCK_SIGNALS.slice(0, FETCH_LIMIT);
@@ -173,10 +176,9 @@ export async function GET() {
   const { bias: marketBias } = computeMarketPulse(ranked);
 
   // ── 5. Respond ────────────────────────────────────────────────────────────
-  return NextResponse.json({
-    marketBias,
-    signals:   ranked,
-    source,
-    timestamp: new Date().toISOString(),
-  });
+  console.log(`[opportunities] source=${source} signals=${ranked.length} ms=${Date.now() - t0}`);
+  return NextResponse.json(
+    { marketBias, signals: ranked, source, timestamp: new Date().toISOString() },
+    { headers: CACHE_HEADERS },
+  );
 }

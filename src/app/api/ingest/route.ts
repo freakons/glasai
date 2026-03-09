@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { ingestGNews } from '@/services/ingestion/gnewsFetcher';
@@ -28,6 +29,7 @@ export const maxDuration = 10; // Vercel Hobby plan limit
                              }
 
                              export async function GET(req: NextRequest) {
+                               const t0 = Date.now();
                                validateEnvironment(['CRON_SECRET', 'GNEWS_API_KEY']);
 
                                if (!isAuthorized(req)) {
@@ -51,6 +53,7 @@ export const maxDuration = 10; // Vercel Hobby plan limit
                                                                                      fetch(`${baseUrl}/api/signals?secret=${secret}`, { method: 'GET' })
                                                                                            .catch((err) => console.error('[ingest] signals trigger failed:', err));
 
+                                                                                               console.log(`[ingest] ingested=${result.ingested} skipped=${result.skipped} ms=${Date.now() - t0}`);
                                                                                                return NextResponse.json({
                                                                                                      ok: true,
                                                                                                            ...result,

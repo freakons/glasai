@@ -1,3 +1,4 @@
+export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { dbQuery } from '@/db/client';
 import { TrendResult } from '@/trends/types';
