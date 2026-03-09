@@ -1,3 +1,5 @@
+import { getProvider } from '@/lib/ai';
+
 function fallbackTopics(text: string): string[] {
   const words = text
     .toLowerCase()
@@ -17,39 +19,17 @@ function fallbackTopics(text: string): string[] {
 }
 
 export async function extractTopics(text: string): Promise<string[]> {
-  if (!process.env.OPENAI_API_KEY) {
-    return fallbackTopics(text);
-  }
-
-  const prompt = `
-Extract 3-5 concise technology topics from the following content.
+  const prompt = `Extract 3-5 concise technology topics from the following content.
 Return them as a JSON array of short phrases.
 CONTENT:
-${text.slice(0, 2000)}
-`;
-
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: 'You extract technology topics.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.2,
-    }),
-  });
-
-  const data = await res.json() as {
-    choices: { message: { content: string } }[];
-  };
+${text.slice(0, 2000)}`;
 
   try {
-    return JSON.parse(data.choices[0].message.content) as string[];
+    const provider = await getProvider();
+    const raw = await provider.classify(prompt);
+    // Extract JSON array from response (handles providers that wrap output in prose)
+    const match = raw.match(/\[[\s\S]*?\]/);
+    return JSON.parse(match ? match[0] : raw) as string[];
   } catch {
     return fallbackTopics(text);
   }

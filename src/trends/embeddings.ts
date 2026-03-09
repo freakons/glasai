@@ -1,22 +1,12 @@
+import { getProvider } from '@/lib/ai';
+
 export async function embedText(text: string): Promise<number[]> {
-  if (!process.env.OPENAI_API_KEY) {
+  try {
+    const provider = await getProvider();
+    return await provider.embed(text);
+  } catch {
     return [];
   }
-
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'text-embedding-3-small',
-      input: text,
-    }),
-  });
-
-  const data = await res.json() as { data: { embedding: number[] }[] };
-  return data.data[0].embedding;
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
