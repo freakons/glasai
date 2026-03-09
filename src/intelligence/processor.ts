@@ -1,5 +1,6 @@
 import { NormalizedSignal } from '@/harvester/types';
 import { SignalCategory, ExtractedEntity, IntelligenceResult } from './types';
+import { extractTopics } from '@/trends/topicExtractor';
 
 // ── Category classification ───────────────────────────────────────────────────
 
@@ -58,7 +59,10 @@ export async function processSignal(signal: NormalizedSignal): Promise<Intellige
   const text = `${signal.title} ${signal.description}`;
 
   const { category, confidence } = classifyCategory(text);
-  const entities = extractEntities(text);
+
+  const topics = await extractTopics(signal.title + ' ' + signal.description);
+  const entities: ExtractedEntity[] = topics.map((name) => ({ type: 'mention', name }));
+
   const summary = extractSummary(signal.description) || signal.title;
 
   return { category, entities, summary, confidence };
