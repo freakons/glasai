@@ -1,4 +1,4 @@
-import { RawSignal } from '../../types';
+import { RawSignal } from '../types';
 
 export interface SourceAdapter {
   name: string;

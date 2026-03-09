@@ -1,5 +1,5 @@
 import Parser from 'rss-parser';
-import { RawSignal } from '../../types';
+import { RawSignal } from '../types';
 import { SourceAdapter } from './sourceAdapter';
 
 export class RssSource implements SourceAdapter {
