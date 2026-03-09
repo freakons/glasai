@@ -9,7 +9,7 @@
  * Pipeline
  * ────────
  *  1. Fetch latest signals from DB
- *     - Production + empty DB → return db-empty sentinel immediately
+ *     - Production + empty DB → trigger background pipeline, return db-empty sentinel
  *     - Development + empty DB → fall back to MOCK_SIGNALS
  *  2. Map each signal → SignalInput and call computeSignalScore()
  *  3. Feed scored results into rankOpportunities() (top 20, score desc)
@@ -29,9 +29,10 @@
  *  }
  */
 
-import { NextResponse }        from 'next/server';
-import { validateEnvironment } from '@/lib/env';
-import { getSignals }          from '@/db/queries';
+import { NextResponse }          from 'next/server';
+import { validateEnvironment }   from '@/lib/env';
+import { triggerPipelineOnce }   from '@/lib/pipelineTrigger';
+import { getSignals }            from '@/db/queries';
 import { MOCK_SIGNALS }        from '@/data/mockSignals';
 import { computeSignalScore }  from '@/lib/signals/signalScore';
 import { rankOpportunities }   from '@/lib/signals/opportunityRanker';
@@ -122,9 +123,11 @@ export async function GET() {
     raw = await getSignals(FETCH_LIMIT);
 
     if (raw.length === 0) {
-      // Production: never serve mock data — surface the empty state explicitly
-      // so operators know the DB needs seeding rather than assuming mock is real.
+      // Production: kick off a background pipeline run so the DB populates
+      // itself, then return the empty sentinel.  The next poll cycle (5 s)
+      // will pick up real data once ingestion completes.
       if (IS_PRODUCTION) {
+        triggerPipelineOnce(); // fire-and-forget, cooldown-gated
         return NextResponse.json({
           marketBias: 'NEUTRAL',
           signals:    [],
