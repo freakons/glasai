@@ -34,6 +34,9 @@ const COOLDOWN_MS = 5 * 60 * 1_000; // 5 minutes
 /** Epoch-ms of the last trigger dispatch. 0 = never triggered. */
 let lastTriggeredAt = 0;
 
+/** True while a pipeline execution is in progress. */
+let pipelineRunning = false;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,12 +63,25 @@ export function triggerPipelineOnce(): void {
   // see the updated timestamp before the async work begins.
   lastTriggeredAt = now;
 
-  void runPipeline();
+  void runPipelineSafe();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal
 // ─────────────────────────────────────────────────────────────────────────────
+
+export async function runPipelineSafe(): Promise<void> {
+  if (pipelineRunning) {
+    console.log('[pipeline] already running, skipping');
+    return;
+  }
+  pipelineRunning = true;
+  try {
+    await runPipeline();
+  } finally {
+    pipelineRunning = false;
+  }
+}
 
 async function runPipeline(): Promise<void> {
   try {
