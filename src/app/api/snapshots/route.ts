@@ -20,6 +20,7 @@ export const runtime = 'nodejs';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
 import { getRecentSignals }            from '@/services/storage/signalStore';
 import { generateSnapshotFromSignals } from '@/services/snapshots/snapshotGenerator';
 import {
@@ -53,31 +54,38 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const latestOnly       = searchParams.get('latest') === 'true';
+    const redisKey         = latestOnly ? 'snapshots:latest' : 'snapshots:list';
+
+    // Redis cache check
+    const redisCached = await redisGet(redisKey);
+    if (redisCached) {
+      return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+    }
 
     if (latestOnly) {
       const snapshot = await getLatestSnapshot();
       if (!snapshot) {
-        // Snapshot not yet generated — not an error, just empty
         return NextResponse.json(
           { ok: true, snapshot: null, message: 'No snapshot generated yet. POST to /api/snapshots to create one.' },
-          { headers: CACHE_HEADERS },
+          { headers: { ...CACHE_HEADERS, 'x-source': 'empty' } },
         );
       }
-      return NextResponse.json({ ok: true, snapshot }, { headers: CACHE_HEADERS });
+      const payload = { ok: true, snapshot };
+      await redisSet(redisKey, payload, TTL.SNAPSHOTS);
+      return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db' } });
     }
 
     const limit     = Math.min(parseInt(searchParams.get('limit') ?? '10', 10), 100);
     const snapshots = await getSnapshots(limit);
+    const payload   = { ok: true, count: snapshots.length, snapshots };
+    await redisSet(redisKey, payload, TTL.SNAPSHOTS);
 
-    return NextResponse.json(
-      { ok: true, count: snapshots.length, snapshots },
-      { headers: CACHE_HEADERS },
-    );
+    return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db' } });
   } catch (err) {
     console.error('[api/snapshots] GET error:', err);
     return NextResponse.json(
       { ok: false, error: 'Failed to fetch snapshots from database', snapshots: [] },
-      { status: 503 },
+      { status: 503, headers: { 'x-source': 'error' } },
     );
   }
 }

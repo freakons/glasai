@@ -30,6 +30,7 @@ import { validateEnvironment } from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
 import { getCache, setCache } from '@/lib/memoryCache';
 import { getEdgeSignals, setEdgeSignals } from '@/lib/edgeCache';
+import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
 import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
@@ -60,34 +61,45 @@ export async function GET(req: NextRequest) {
 
   if (!isAuthRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
+    const redisCacheKey = limit === 50 ? 'signals:latest' : `signals:list:limit:${limit}`;
 
     // 1. Edge cache (KV-backed, cross-region)
     const edgeCached = await getEdgeSignals();
     if (edgeCached) {
-      return Response.json(edgeCached);
+      logWithRequestId(reqId, 'signals', `cache_hit source=edge ms=${Date.now() - t0}`);
+      return NextResponse.json(edgeCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
     }
 
-    // 2. In-process memory cache (per-instance, 5 s)
+    // 2. Redis cache (Upstash, cross-region, persistent)
+    const redisCached = await redisGet(redisCacheKey);
+    if (redisCached) {
+      logWithRequestId(reqId, 'signals', `cache_hit source=redis ms=${Date.now() - t0}`);
+      return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+    }
+
+    // 3. In-process memory cache (per-instance, 5 s)
     const cached = getCache('signals', 5000);
     if (cached) {
-      return Response.json(cached);
+      logWithRequestId(reqId, 'signals', `cache_hit source=memory ms=${Date.now() - t0}`);
+      return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
     }
 
-    // 3. Database query
+    // 4. Database query
     try {
       const dbSignals = await getSignals(limit);
 
       if (dbSignals.length > 0) {
         const payload = { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length };
         await setEdgeSignals(payload);
+        await redisSet(redisCacheKey, payload, TTL.SIGNALS);
         setCache('signals', payload);
-        logWithRequestId(reqId, 'signals', `source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
-        return NextResponse.json(payload, { headers: CACHE_HEADERS });
+        logWithRequestId(reqId, 'signals', `cache_miss source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
+        return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db' } });
       }
 
       // DB is reachable but has no signals yet — return an explicit empty state.
       // Do NOT serve mock data: this would mask a real pipeline issue.
-      logWithRequestId(reqId, 'signals', `source=empty ms=${Date.now() - t0}`);
+      logWithRequestId(reqId, 'signals', `cache_miss source=empty ms=${Date.now() - t0}`);
       return NextResponse.json(
         {
           ok: true,
@@ -96,7 +108,7 @@ export async function GET(req: NextRequest) {
           count: 0,
           message: 'No signals ingested yet. Trigger /api/ingest to populate.',
         },
-        { headers: CACHE_HEADERS },
+        { headers: { ...CACHE_HEADERS, 'x-source': 'empty' } },
       );
     } catch (err) {
       // DB query failed — surface the error clearly rather than hiding it with mock data.
@@ -109,7 +121,7 @@ export async function GET(req: NextRequest) {
           signals: [],
           count: 0,
         },
-        { status: 503 },
+        { status: 503, headers: { 'x-source': 'error' } },
       );
     }
   }
