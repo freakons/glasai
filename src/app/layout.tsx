@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Instrument_Serif, DM_Sans, DM_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import { siteConfig } from '@/config/site';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
@@ -8,24 +8,33 @@ import { Footer } from '@/components/layout/Footer';
 import { AmbientBackground } from '@/components/layout/AmbientBackground';
 import '@/styles/globals.css';
 
-const instrumentSerif = Instrument_Serif({
-  weight: '400',
-  style: ['normal', 'italic'],
-  subsets: ['latin'],
+const instrumentSerif = localFont({
+  src: [
+    { path: '../fonts/InstrumentSerif-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../fonts/InstrumentSerif-Italic.woff2', weight: '400', style: 'italic' },
+  ],
   variable: '--font-instrument-serif',
   display: 'swap',
 });
 
-const dmSans = DM_Sans({
-  weight: ['300', '400', '500', '600', '700'],
-  subsets: ['latin'],
+const dmSans = localFont({
+  src: [
+    { path: '../fonts/DMSans-Light.woff2', weight: '300', style: 'normal' },
+    { path: '../fonts/DMSans-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../fonts/DMSans-Medium.woff2', weight: '500', style: 'normal' },
+    { path: '../fonts/DMSans-SemiBold.woff2', weight: '600', style: 'normal' },
+    { path: '../fonts/DMSans-Bold.woff2', weight: '700', style: 'normal' },
+  ],
   variable: '--font-dm-sans',
   display: 'swap',
 });
 
-const dmMono = DM_Mono({
-  weight: ['300', '400', '500'],
-  subsets: ['latin'],
+const dmMono = localFont({
+  src: [
+    { path: '../fonts/DMMono-Light.woff2', weight: '300', style: 'normal' },
+    { path: '../fonts/DMMono-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../fonts/DMMono-Medium.woff2', weight: '500', style: 'normal' },
+  ],
   variable: '--font-dm-mono',
   display: 'swap',
 });

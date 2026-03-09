@@ -35,6 +35,9 @@
     },
     "devDependencies": {
         "@eslint/eslintrc": "^3.3.5",
+        "@fontsource/dm-mono": "^5.2.7",
+        "@fontsource/dm-sans": "^5.2.8",
+        "@fontsource/instrument-serif": "^5.2.8",
         "@tailwindcss/postcss": "^4.2.1",
         "eslint": "^9.39.4",
         "eslint-config-next": "^16.1.6",
