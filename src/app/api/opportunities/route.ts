@@ -33,6 +33,7 @@ export const runtime = 'nodejs';
 import { NextResponse }          from 'next/server';
 import { validateEnvironment }   from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { broadcastOpportunity }  from '@/server/opportunitySocket';
 import { triggerPipelineOnce }   from '@/lib/pipelineTrigger';
 import { getSignals }            from '@/db/queries';
 import { MOCK_SIGNALS }        from '@/data/mockSignals';
@@ -178,6 +179,7 @@ export async function GET() {
   const { bias: marketBias } = computeMarketPulse(ranked);
 
   // ── 5. Respond ────────────────────────────────────────────────────────────
+  broadcastOpportunity({ type: 'opportunity_update', data: ranked });
   logWithRequestId(reqId, 'opportunities', `source=${source} signals=${ranked.length} ms=${Date.now() - t0}`);
   return NextResponse.json(
     { marketBias, signals: ranked, source, timestamp: new Date().toISOString() },
