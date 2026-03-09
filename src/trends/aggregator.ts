@@ -1,5 +1,6 @@
 import { TrendSignal, TrendResult } from './types';
 import { scoreSignal } from './scoring';
+import { clusterTopics } from './cluster';
 
 const MIN_OCCURRENCES = 3;
 
@@ -53,6 +54,36 @@ export function aggregateTrends(signals: TrendSignal[]): TrendResult[] {
     });
   }
 
+  // cluster similar topics and merge each cluster into its canonical entry
+  const topicIndex = new Map(trends.map((t) => [t.topic, t]));
+  const clusters = clusterTopics(trends.map((t) => t.topic));
+  const merged: TrendResult[] = [];
+
+  for (const cluster of clusters) {
+    const canonical = topicIndex.get(cluster[0])!;
+    if (cluster.length === 1) {
+      merged.push(canonical);
+      continue;
+    }
+    // fold every non-canonical member into the canonical entry
+    let combinedSignalCount = canonical.signal_count;
+    let combinedScore = canonical.score;
+    const combinedEntities = new Set(canonical.entities);
+    for (const member of cluster.slice(1)) {
+      const t = topicIndex.get(member)!;
+      combinedSignalCount += t.signal_count;
+      combinedScore += t.score;
+      t.entities.forEach((e) => combinedEntities.add(e));
+    }
+    merged.push({
+      ...canonical,
+      signal_count: combinedSignalCount,
+      score:        combinedScore,
+      entities:     [...combinedEntities].filter((e) => e !== canonical.topic).slice(0, 5),
+      confidence:   Math.min(100, combinedSignalCount * 20),
+    });
+  }
+
   // highest confidence first
-  return trends.sort((a, b) => b.confidence - a.confidence);
+  return merged.sort((a, b) => b.confidence - a.confidence);
 }
