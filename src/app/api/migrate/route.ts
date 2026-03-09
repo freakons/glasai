@@ -155,6 +155,31 @@ const STATEMENTS = [
     recorded_at  TIMESTAMP DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_trend_timeseries_topic_time ON trend_timeseries(topic, recorded_at DESC)`,
+
+  // ── Trends (aggregated trend snapshots) ──────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS trends (
+    id           SERIAL PRIMARY KEY,
+    topic        TEXT NOT NULL,
+    direction    TEXT CHECK (direction IN ('rising','falling','stable')),
+    score        NUMERIC(5,2),
+    signal_count INT NOT NULL DEFAULT 0,
+    summary      TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_trends_created_at ON trends (created_at DESC)`,
+
+  // ── Pipeline runs (health monitoring) ────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id                SERIAL PRIMARY KEY,
+    stage             TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK (status IN ('ok','error','partial')),
+    duration_ms       INT,
+    ingested          INT,
+    signals_generated INT,
+    error_msg         TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_created_at ON pipeline_runs (created_at DESC)`,
 ];
 
 /** Table names that are created (or verified) by the migration. */
@@ -168,6 +193,8 @@ const TABLES_CREATED = [
   'signal_entities',
   'access_requests',
   'trend_timeseries',
+  'trends',
+  'pipeline_runs',
 ];
 
 export async function POST(req: NextRequest) {

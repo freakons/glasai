@@ -44,7 +44,15 @@ const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
   const reqId = createRequestId();
-  validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
+  try {
+    validateEnvironment(['DATABASE_URL']);
+  } catch (err) {
+    console.error('[api/signals] environment validation failed:', err);
+    return NextResponse.json(
+      { ok: false, source: 'error', error: 'signals query failed', signals: [], count: 0 },
+      { status: 503 },
+    );
+  }
 
   const { searchParams } = new URL(req.url);
   const cronSecret  = req.headers.get('x-vercel-cron-secret') || '';
@@ -62,34 +70,53 @@ export async function GET(req: NextRequest) {
   if (!isAuthRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
     const redisCacheKey = limit === 50 ? 'signals:latest' : `signals:list:limit:${limit}`;
+    const debug = searchParams.get('debug') === 'true';
 
-    // 1. Edge cache (KV-backed, cross-region)
-    const edgeCached = await getEdgeSignals();
-    if (edgeCached) {
-      logWithRequestId(reqId, 'signals', `cache_hit source=edge ms=${Date.now() - t0}`);
-      return NextResponse.json(edgeCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
-    }
-
-    // 2. Redis cache (Upstash, cross-region, persistent)
-    const redisCached = await redisGet(redisCacheKey);
-    if (redisCached) {
-      logWithRequestId(reqId, 'signals', `cache_hit source=redis ms=${Date.now() - t0}`);
-      return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
-    }
-
-    // 3. In-process memory cache (per-instance, 5 s)
-    const cached = getCache('signals', 5000);
-    if (cached) {
-      logWithRequestId(reqId, 'signals', `cache_hit source=memory ms=${Date.now() - t0}`);
-      return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
-    }
-
-    // 4. Database query
     try {
+      // 1. Edge cache (KV-backed, cross-region)
+      const edgeCached = await getEdgeSignals();
+      if (edgeCached) {
+        logWithRequestId(reqId, 'signals', `cache_hit source=edge ms=${Date.now() - t0}`);
+        return NextResponse.json(edgeCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+      }
+
+      // 2. Redis cache (Upstash, cross-region, persistent)
+      const redisCached = await redisGet(redisCacheKey);
+      if (redisCached) {
+        logWithRequestId(reqId, 'signals', `cache_hit source=redis ms=${Date.now() - t0}`);
+        return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+      }
+
+      // 3. In-process memory cache (per-instance, 5 s)
+      const cached = getCache('signals', 5000);
+      if (cached) {
+        logWithRequestId(reqId, 'signals', `cache_hit source=memory ms=${Date.now() - t0}`);
+        return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+      }
+
+      // 4. Database query
       const dbSignals = await getSignals(limit);
 
+      // Diagnostics: log table state for debugging
+      let diagnostics: Record<string, unknown> | undefined;
+      if (debug || dbSignals.length === 0) {
+        try {
+          const { dbQuery: rawQuery } = await import('@/db/client');
+          const countResult = await rawQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`;
+          const sampleResult = await rawQuery<Record<string, unknown>>`SELECT id, title, status, signal_type, confidence_score, created_at FROM signals ORDER BY created_at DESC LIMIT 1`;
+          diagnostics = {
+            totalRows: countResult[0]?.count ?? 'unknown',
+            sampleRow: sampleResult[0] ?? null,
+          };
+          console.log('[api/signals] diagnostics:', JSON.stringify(diagnostics));
+        } catch (diagErr) {
+          console.warn('[api/signals] diagnostics query failed:', diagErr);
+        }
+      }
+
       if (dbSignals.length > 0) {
-        const payload = { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length };
+        const payload: Record<string, unknown> = { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length };
+        if (debug && diagnostics) payload.diagnostics = diagnostics;
         await setEdgeSignals(payload);
         await redisSet(redisCacheKey, payload, TTL.SIGNALS);
         setCache('signals', payload);
@@ -107,17 +134,18 @@ export async function GET(req: NextRequest) {
           signals: [],
           count: 0,
           message: 'No signals ingested yet. Trigger /api/ingest to populate.',
+          ...(diagnostics ? { diagnostics } : {}),
         },
         { headers: { ...CACHE_HEADERS, 'x-source': 'empty' } },
       );
     } catch (err) {
-      // DB query failed — surface the error clearly rather than hiding it with mock data.
-      console.error('[api/signals] DB fetch error:', err);
+      // Cache or DB query failed — surface the error clearly rather than hiding it with mock data.
+      console.error('[api/signals] fetch error:', err);
       return NextResponse.json(
         {
           ok: false,
           source: 'error',
-          error: process.env.NODE_ENV === 'production' ? 'Database unavailable' : String(err),
+          error: process.env.NODE_ENV === 'production' ? 'signals query failed' : String(err),
           signals: [],
           count: 0,
         },

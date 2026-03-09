@@ -87,7 +87,7 @@ export async function saveSignal(signal: Signal): Promise<boolean> {
     INSERT INTO signals (
       id, signal_type, title, description, supporting_events,
       confidence_score, direction, affected_entities, recommendation,
-      human_verified, created_at
+      human_verified, created_at, status
     ) VALUES (
       ${signal.id},
       ${signal.type ?? null},
@@ -99,7 +99,8 @@ export async function saveSignal(signal: Signal): Promise<boolean> {
       ${affectedEntitiesArray},
       ${signal.recommendation ?? null},
       ${signal.humanVerified ?? false},
-      ${signal.createdAt}
+      ${signal.createdAt},
+      'auto'
     )
     ON CONFLICT (id) DO NOTHING
     RETURNING id

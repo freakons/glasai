@@ -104,46 +104,52 @@ export async function POST(req: NextRequest) {
 
   // ── Stage 1: Harvester ────────────────────────────────────────────────────
   const t1 = Date.now();
+  console.log('pipeline stage: harvester started');
   try {
     await runHarvester();
     const d = Date.now() - t1;
     stages.push({ stage: 'harvester', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=harvester status=ok ms=${d}`);
+    console.log('pipeline stage: harvester completed');
   } catch (err) {
     const d = Date.now() - t1;
     const msg = String(err);
     stages.push({ stage: 'harvester', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] harvester failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: harvester failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
   // ── Stage 2: Trend Analysis ───────────────────────────────────────────────
   const t2 = Date.now();
+  console.log('pipeline stage: trend analysis started');
   try {
     await runTrendAnalysis();
     const d = Date.now() - t2;
     stages.push({ stage: 'trends', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=trends status=ok ms=${d}`);
+    console.log('pipeline stage: trend analysis completed');
   } catch (err) {
     const d = Date.now() - t2;
     const msg = String(err);
     stages.push({ stage: 'trends', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] trend analysis failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: trend analysis failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
   // ── Stage 3: Insight Generation ───────────────────────────────────────────
   const t3 = Date.now();
+  console.log('pipeline stage: insight generation started');
   try {
     await runInsightGeneration();
     const d = Date.now() - t3;
     stages.push({ stage: 'insights', status: 'ok', durationMs: d });
     logWithRequestId(reqId, 'intelligence/run', `stage=insights status=ok ms=${d}`);
+    console.log('pipeline stage: insight generation completed');
   } catch (err) {
     const d = Date.now() - t3;
     const msg = String(err);
     stages.push({ stage: 'insights', status: 'error', durationMs: d, error: msg });
-    console.error(`[intelligence/run] insight generation failed reqId=${reqId}:`, err);
+    console.error(`pipeline stage: insight generation failed reqId=${reqId}:`, err);
     anyError = true;
   }
 
