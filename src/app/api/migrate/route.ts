@@ -124,6 +124,20 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_entities_type       ON entities (type)`,
   `CREATE INDEX IF NOT EXISTS idx_entities_created_at ON entities (created_at DESC)`,
 
+  // ── Ensure entities.name is unique (required for upsert deduplication) ──
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name ON entities (name)`,
+
+  // ── Signal–entity relationships (graph edges) ─────────────────────────────
+  `CREATE TABLE IF NOT EXISTS signal_entities (
+    signal_id  TEXT          NOT NULL REFERENCES signals (id) ON DELETE CASCADE,
+    entity_id  TEXT          NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
+    confidence NUMERIC(4,3)  NOT NULL DEFAULT 0.8
+                             CHECK (confidence BETWEEN 0.0 AND 1.0),
+    PRIMARY KEY (signal_id, entity_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_signal_entities_signal_id ON signal_entities (signal_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_signal_entities_entity_id ON signal_entities (entity_id)`,
+
   // ── Access requests ───────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS access_requests (
     id         SERIAL PRIMARY KEY,
@@ -141,6 +155,7 @@ const TABLES_CREATED = [
   'signals',
   'events',
   'entities',
+  'signal_entities',
   'access_requests',
 ];
 

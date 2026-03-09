@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQuery } from '@/db/client';
 import { evaluateSignalTrust } from '@/lib/trustEngine';
+import { extractEntities } from '@/lib/intelligence/entityExtractor';
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>;
@@ -92,6 +93,37 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('[intelligence/ingest] db error:', err);
     return NextResponse.json({ error: 'Failed to persist signal' }, { status: 500 });
+  }
+
+  // ── Extract entities and persist graph edges ──────────────────────────────
+  const signalText = `${title.trim()} ${typeof summary === 'string' ? summary : ''}`;
+  try {
+    const { entities } = await extractEntities(signalText);
+
+    for (const entity of entities) {
+      const entityId = crypto.randomUUID();
+
+      // Upsert entity by name (unique index on entities.name)
+      const rows = await dbQuery<{ id: string }>`
+        INSERT INTO entities (id, name, type, created_at)
+        VALUES (${entityId}, ${entity.name}, ${entity.type}, NOW())
+        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id
+      `;
+
+      const resolvedId = rows[0]?.id;
+      if (!resolvedId) continue;
+
+      // Insert signal→entity edge (ignore if already exists)
+      await dbQuery`
+        INSERT INTO signal_entities (signal_id, entity_id, confidence)
+        VALUES (${id}, ${resolvedId}, ${0.8})
+        ON CONFLICT (signal_id, entity_id) DO NOTHING
+      `;
+    }
+  } catch (err) {
+    // Entity extraction is best-effort — log but don't fail the request
+    console.error('[intelligence/ingest] entity extraction error:', err);
   }
 
   return NextResponse.json({
