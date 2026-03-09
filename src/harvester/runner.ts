@@ -1,21 +1,16 @@
-import { SourceAdapter } from './sources/sourceAdapter';
-import { RssSource } from './sources/rssSource';
 import { normalizeSignal } from './normalizer';
 import { sendSignal } from './sender';
 import { processSignal } from '@/intelligence/processor';
 import { scoreSignal } from '@/intelligence/scoring';
 import { isDuplicate } from '@/intelligence/deduplicator';
+import { getSources } from './sources/registry';
 
 const MIN_SCORE = 40;
 
-// ── Register sources ──────────────────────────────────────────────────────────
-const sources: SourceAdapter[] = [
-  new RssSource('https://news.ycombinator.com/rss'),
-];
-
 // ── Orchestration ─────────────────────────────────────────────────────────────
 export async function runHarvester(): Promise<void> {
-  console.log(`[harvester/runner] starting — ${sources.length} source(s) registered`);
+  const sources = getSources();
+  console.log(`[harvester/runner] Harvester running with ${sources.length} sources`);
 
   let totalFetched = 0;
   let totalProcessed = 0;
