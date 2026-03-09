@@ -10,6 +10,7 @@ export interface TrendResult {
   topic: string;
   category: string;
   signal_count: number;
+  score: number;
   entities: string[];
   summary: string;
   confidence: number;

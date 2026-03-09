@@ -1,19 +1,21 @@
 import { TrendSignal, TrendResult } from './types';
+import { scoreSignal } from './scoring';
 
 const MIN_OCCURRENCES = 3;
 
 export function aggregateTrends(signals: TrendSignal[]): TrendResult[] {
-  // entity name → { count, categories, related entities }
-  const entityFreq = new Map<string, { count: number; categories: string[]; related: Set<string> }>();
+  // entity name → { count, score, categories, related entities }
+  const entityFreq = new Map<string, { count: number; score: number; categories: string[]; related: Set<string> }>();
 
   for (const signal of signals) {
     const names = signal.entities.map((e) => e.name);
     for (const name of names) {
       if (!entityFreq.has(name)) {
-        entityFreq.set(name, { count: 0, categories: [], related: new Set() });
+        entityFreq.set(name, { count: 0, score: 0, categories: [], related: new Set() });
       }
       const entry = entityFreq.get(name)!;
       entry.count++;
+      entry.score += scoreSignal(signal);
       entry.categories.push(signal.category);
       // track co-occurring entities
       for (const other of names) {
@@ -24,7 +26,7 @@ export function aggregateTrends(signals: TrendSignal[]): TrendResult[] {
 
   const trends: TrendResult[] = [];
 
-  for (const [entity, { count, categories, related }] of entityFreq) {
+  for (const [entity, { count, score, categories, related }] of entityFreq) {
     if (count < MIN_OCCURRENCES) continue;
 
     // most common category among this entity's signals
@@ -44,6 +46,7 @@ export function aggregateTrends(signals: TrendSignal[]): TrendResult[] {
       topic: entity,
       category: dominantCategory,
       signal_count: count,
+      score,
       entities: relatedEntities,
       summary: `Multiple signals mention ${entity} across ${categoryLabel} activity.`,
       confidence: Math.min(100, count * 20),

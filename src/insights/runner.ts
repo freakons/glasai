@@ -9,6 +9,7 @@ interface TrendRow {
   topic: string;
   category: string;
   signal_count: number;
+  score: number;
   entities: string[] | null;
   summary: string;
   confidence: number;
@@ -21,6 +22,7 @@ const MOCK_TRENDS: TrendResult[] = [
     topic:        'OpenAI',
     category:     'ai_model_release',
     signal_count: 5,
+    score:        10,
     entities:     ['GPT-5', 'Microsoft'],
     summary:      'Multiple signals mention OpenAI across AI model release activity.',
     confidence:   100,
@@ -29,6 +31,7 @@ const MOCK_TRENDS: TrendResult[] = [
     topic:        'Anthropic',
     category:     'funding',
     signal_count: 3,
+    score:        6,
     entities:     ['Claude', 'Google'],
     summary:      'Multiple signals mention Anthropic across funding activity.',
     confidence:   60,
@@ -54,6 +57,7 @@ async function loadTrends(): Promise<TrendResult[]> {
     topic:        row.topic,
     category:     row.category,
     signal_count: row.signal_count,
+    score:        row.score ?? 0,
     entities:     Array.isArray(row.entities) ? row.entities : [],
     summary:      row.summary,
     confidence:   row.confidence,
