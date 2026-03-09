@@ -165,43 +165,31 @@ export async function POST(req: NextRequest) {
 
   const url = new URL(req.url);
 
-  // Accept either ADMIN_SECRET (via ?key=) or CRON_SECRET (via ?secret= / x-cron-secret header)
-  const keyParam    = url.searchParams.get('key')    || '';
-  const secretParam = url.searchParams.get('secret') || '';
-  const cronHeader  = req.headers.get('x-cron-secret') || '';
+  // ADMIN_SECRET is required — accept it via ?key= query param only.
+  const keyParam    = url.searchParams.get('key') || '';
+  const adminSecret = process.env.ADMIN_SECRET    || '';
 
-  const adminSecret = process.env.ADMIN_SECRET || '';
-  const cronSecret  = process.env.CRON_SECRET  || '';
-
-  const authorizedByAdmin = adminSecret !== '' && keyParam === adminSecret;
-  const authorizedByCron  = cronSecret  !== '' && (secretParam === cronSecret || cronHeader === cronSecret);
-
-  // If either secret is configured, at least one must match
-  if ((adminSecret !== '' || cronSecret !== '') && !authorizedByAdmin && !authorizedByCron) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    return NextResponse.json({ error: 'DATABASE_URL not configured' }, { status: 500 });
+  if (!adminSecret || keyParam !== adminSecret) {
+    return NextResponse.json({ status: 'error', message: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const sql = neon(dbUrl);
+    const sql = neon(process.env.DATABASE_URL!);
 
     for (const stmt of STATEMENTS) {
       await sql(stmt);
     }
 
+    console.log('[migration] database schema verified');
+
     return NextResponse.json({
-      ok:             true,
-      message:        'Migration complete',
-      statements:     STATEMENTS.length,
-      tables_created: TABLES_CREATED,
+      status:       'success',
+      tablesCreated: TABLES_CREATED,
     });
   } catch (err) {
-    console.error('[migrate] error:', err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[migrate] error:', message);
+    return NextResponse.json({ status: 'error', message }, { status: 500 });
   }
 }
 
