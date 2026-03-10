@@ -12,6 +12,19 @@
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Schema-safety helpers (per-process in-memory caches)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Cache of table existence results — populated on first check per table. */
+const _tableExistsCache = new Map<string, boolean>();
+
+/**
+ * Tables we've already emitted a "missing" warning for during this runtime
+ * session.  Prevents duplicate console.warn spam per build/runtime process.
+ */
+const _missingTableWarned = new Set<string>();
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Connection
 //
 // Uses globalThis so the client survives HMR reloads in development and is
@@ -125,7 +138,20 @@ export async function dbQuery<T = Record<string, unknown>>(
     const result = await withDbTimeout((client as any)(strings, ...values));
     return result as T[];
   } catch (err) {
-    console.error('[db/client] Query error:', err);
+    const pgCode = (err as { code?: string })?.code;
+    if (pgCode === '42P01') {
+      // Postgres "undefined_table" — expected during build when migrations
+      // have not yet been applied.  Downgrade to a single deduplicated warn.
+      const msg = (err as { message?: string })?.message ?? '';
+      const tableMatch = msg.match(/relation "([^"]+)" does not exist/);
+      const tableName = tableMatch?.[1] ?? 'unknown';
+      if (!_missingTableWarned.has(tableName)) {
+        _missingTableWarned.add(tableName);
+        console.warn(`[db/client] Table "${tableName}" does not exist yet — returning empty result (run /api/migrate to create schema)`);
+      }
+    } else {
+      console.error('[db/client] Query error:', err);
+    }
     return [];
   }
 }
@@ -153,6 +179,37 @@ export async function dbExec(rawSql: string): Promise<void> {
     console.error('[db/client] dbExec error:', err);
     throw err;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Table existence guard
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the named table exists in the public schema.
+ *
+ * Uses PostgreSQL's `to_regclass()` which never throws an undefined_table
+ * error — it simply returns NULL when the table is absent.  Results are
+ * cached for the lifetime of the process so repeated calls within a single
+ * build/runtime session are free.
+ *
+ * @example
+ * if (!(await tableExists('regulations'))) return [];
+ */
+export async function tableExists(tableName: string): Promise<boolean> {
+  if (_tableExistsCache.has(tableName)) {
+    return _tableExistsCache.get(tableName)!;
+  }
+
+  const qualifiedName = `public.${tableName}`;
+  // dbQuery returns [] when the client is unavailable or the query fails,
+  // so this is always safe to call.
+  const rows = await dbQuery<{ exists: boolean }>`
+    SELECT (to_regclass(${qualifiedName}) IS NOT NULL) AS exists
+  `;
+  const exists = rows[0]?.exists === true;
+  _tableExistsCache.set(tableName, exists);
+  return exists;
 }
 
 /**
