@@ -91,21 +91,38 @@ async function runPipeline(): Promise<void> {
   try {
     // Dynamic imports keep these heavy modules out of the /api/opportunities
     // bundle — they are only loaded when this function actually executes.
-    const { ingestGNews }              = await import('@/services/ingestion/gnewsFetcher');
-    const { getRecentEvents }          = await import('@/services/storage/eventStore');
+    const { ingestGNews }               = await import('@/services/ingestion/gnewsFetcher');
+    const { getRecentEvents }           = await import('@/services/storage/eventStore');
     const { generateSignalsFromEvents } = await import('@/services/signals/signalEngine');
-    const { saveSignals }              = await import('@/services/storage/signalStore');
-    const { recordPipelineRun }        = await import('@/lib/pipelineHealth');
+    const { saveSignals }               = await import('@/services/storage/signalStore');
+    const { recordPipelineRun }         = await import('@/lib/pipelineHealth');
 
-    const { ingested }     = await ingestGNews();
-    const events           = await getRecentEvents(500);
-    const signals          = generateSignalsFromEvents(events);
-    const signalsSaved     = await saveSignals(signals);
+    const { ingested }  = await ingestGNews();
+    const events        = await getRecentEvents(500);
+    const signals       = generateSignalsFromEvents(events);
+    const signalsSaved  = await saveSignals(signals);
 
     recordPipelineRun(signalsSaved);
     console.log(
       `[pipeline] self-heal complete — ingested=${ingested} events=${events.length} signals=${signalsSaved}`,
     );
+
+    // ── Context generation stage ───────────────────────────────────────────
+    // Runs after signal persistence.  Failures are non-fatal: a per-signal
+    // error is recorded in signal_contexts.generation_error and the pipeline
+    // continues normally.
+    try {
+      const { generateContextsForSignals } = await import('@/services/intelligence/contextGenerator');
+      const ctx = await generateContextsForSignals(signals, events);
+      console.log(
+        `[pipeline] context generation — attempted=${ctx.attempted} generated=${ctx.generated} failed=${ctx.failed}`,
+      );
+    } catch (ctxErr) {
+      console.error(
+        '[pipeline] context generation stage error:',
+        ctxErr instanceof Error ? ctxErr.message : String(ctxErr),
+      );
+    }
   } catch (err) {
     console.error(
       '[pipeline] self-heal failed:',
