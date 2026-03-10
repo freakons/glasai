@@ -271,6 +271,51 @@ const STATEMENTS = [
      ADD COLUMN IF NOT EXISTS amount_usd_m NUMERIC(12, 2)`,
   `CREATE INDEX IF NOT EXISTS idx_funding_rounds_amount_usd
      ON funding_rounds (amount_usd_m DESC NULLS LAST)`,
+
+  // ── Migration 005: pipeline hardening ────────────────────────────────────
+  // Extends pipeline_runs into a full operational ledger.
+  // Adds pipeline_locks for distributed concurrency control.
+  // Adds page_snapshots for precomputed read models.
+
+  // pipeline_runs: extend with operational columns
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS run_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS trigger_type      TEXT        DEFAULT 'internal'`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS started_at        TIMESTAMPTZ`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS completed_at      TIMESTAMPTZ`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS articles_fetched  INTEGER`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS articles_inserted INTEGER`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS articles_deduped  INTEGER`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS events_created    INTEGER`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS warnings_count    INTEGER DEFAULT 0`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS errors_count      INTEGER DEFAULT 0`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS error_summary     TEXT`,
+  `ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS correlation_id    TEXT`,
+  // Expand status constraint to include 'skipped' and 'started'
+  `ALTER TABLE pipeline_runs DROP CONSTRAINT IF EXISTS pipeline_runs_status_check`,
+  `ALTER TABLE pipeline_runs ADD CONSTRAINT pipeline_runs_status_check
+     CHECK (status IN ('ok', 'error', 'partial', 'skipped', 'started'))`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status      ON pipeline_runs (status)`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_trigger     ON pipeline_runs (trigger_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_runs_correlation ON pipeline_runs (correlation_id)`,
+
+  // pipeline_locks: distributed lock table
+  `CREATE TABLE IF NOT EXISTS pipeline_locks (
+    lock_key   TEXT        PRIMARY KEY,
+    locked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    run_id     TEXT,
+    locked_by  TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pipeline_locks_expires ON pipeline_locks (expires_at)`,
+
+  // page_snapshots: precomputed read models for public pages
+  `CREATE TABLE IF NOT EXISTS page_snapshots (
+    key          TEXT        PRIMARY KEY,
+    payload      JSONB       NOT NULL DEFAULT '{}',
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ttl_seconds  INTEGER     NOT NULL DEFAULT 300
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_page_snapshots_generated_at ON page_snapshots (generated_at DESC)`,
 ];
 
 /**
@@ -313,8 +358,12 @@ const TABLES_CREATED = [
   'regulations',
   'ai_models',
   'funding_rounds',
-  // migration 004 column additions (noted, not a new table)
+  // migration 004 column additions
   'funding_rounds.amount_usd_m (column)',
+  // migration 005
+  'pipeline_locks',
+  'page_snapshots',
+  'pipeline_runs (extended: trigger_type, articles_*, errors_count, correlation_id, ...)',
 ];
 
 export async function POST(req: NextRequest) {
