@@ -16,7 +16,7 @@
  *   funding_rounds — populated by seeding or admin input (migration 003)
  */
 
-import { dbQuery } from '@/db/client';
+import { dbQuery, tableExists } from '@/db/client';
 import type { Signal, SignalCategory } from '@/data/mockSignals';
 import type { AiEvent, EventType } from '@/data/mockEvents';
 import type { EntityProfile, RiskLevel } from '@/data/mockEntities';
@@ -431,6 +431,8 @@ function isRegStatus(v: string): v is RegStatus { return REG_STATUSES.includes(v
  * @param limit  Maximum regulations to return (default 50).
  */
 export async function getRegulations(type?: string, limit = 50): Promise<Regulation[]> {
+  if (!(await tableExists('regulations'))) return [];
+
   const safeLimit = Math.min(Math.max(1, limit), 200);
 
   const rows = type && type !== 'all'
@@ -494,6 +496,8 @@ function isModelType(v: string): v is ModelType { return MODEL_TYPES.includes(v 
  * @param limit  Maximum models to return (default 50).
  */
 export async function getModels(limit = 50): Promise<AIModel[]> {
+  if (!(await tableExists('ai_models'))) return [];
+
   const safeLimit = Math.min(Math.max(1, limit), 200);
 
   const rows = await dbQuery<AiModelRow>`
@@ -545,6 +549,8 @@ function rowToFundingRound(row: FundingRoundRow): FundingRound {
  * @param limit  Maximum rounds to return (default 50).
  */
 export async function getFundingRounds(limit = 50): Promise<FundingRound[]> {
+  if (!(await tableExists('funding_rounds'))) return [];
+
   const safeLimit = Math.min(Math.max(1, limit), 200);
 
   const rows = await dbQuery<FundingRoundRow>`
@@ -589,58 +595,79 @@ const STATS_ZERO: SiteStats = {
 /**
  * Compute live site-wide statistics from the database.
  *
- * Core counts (signals, entities, regulations, article sources, funding rounds,
- * ai_models) are fetched in a single query.  The funding total requires
- * migration 004 and is fetched in a separate, independently-failing query so
- * a missing column never corrupts the core counts.
+ * Core counts (signals, entities, article sources) are fetched together.
+ * Optional tables (regulations, ai_models, funding_rounds) are guarded by
+ * existence checks first so a missing table never corrupts core counts or
+ * produces 42P01 errors during build-time static rendering.
  *
  * Returns graceful zero fallbacks on any failure.
  */
 export async function getSiteStats(): Promise<SiteStats> {
   try {
-    type CoreRow = {
-      signals: string; companies: string; regulations: string;
-      sources: string; funding_rounds: string; models: string;
-    };
+    // ── Core tables (always expected) ────────────────────────────────────────
+    type CoreRow = { signals: string; companies: string; sources: string };
 
-    const rows = await dbQuery<CoreRow>`
+    const coreRows = await dbQuery<CoreRow>`
       SELECT
         (SELECT COUNT(*) FROM signals
-          WHERE status IS NULL OR status NOT IN ('rejected'))::text  AS signals,
-        (SELECT COUNT(*) FROM entities)::text                        AS companies,
-        (SELECT COUNT(*) FROM regulations)::text                     AS regulations,
-        (SELECT COUNT(DISTINCT source) FROM articles)::text          AS sources,
-        (SELECT COUNT(*) FROM funding_rounds)::text                  AS funding_rounds,
-        (SELECT COUNT(*) FROM ai_models)::text                       AS models
+          WHERE status IS NULL OR status NOT IN ('rejected'))::text AS signals,
+        (SELECT COUNT(*) FROM entities)::text                       AS companies,
+        (SELECT COUNT(DISTINCT source) FROM articles)::text         AS sources
     `;
 
-    if (rows.length === 0) return STATS_ZERO;
-    const r = rows[0];
-
+    if (coreRows.length === 0) return STATS_ZERO;
+    const c = coreRows[0];
     const base = {
-      signals:       parseInt(r.signals,        10) || 0,
-      companies:     parseInt(r.companies,      10) || 0,
-      regulations:   parseInt(r.regulations,    10) || 0,
-      sources:       parseInt(r.sources,        10) || 0,
-      fundingRounds: parseInt(r.funding_rounds, 10) || 0,
-      models:        parseInt(r.models,         10) || 0,
+      signals:   parseInt(c.signals,   10) || 0,
+      companies: parseInt(c.companies, 10) || 0,
+      sources:   parseInt(c.sources,   10) || 0,
     };
 
-    // Optional: total funding from normalised column (requires migration 004).
-    // Independent try/catch — a missing column never breaks core counts.
-    let totalFundingUsdM = 0;
-    try {
-      const fundRows = await dbQuery<{ total: string }>`
-        SELECT COALESCE(SUM(amount_usd_m), 0)::text AS total
-        FROM funding_rounds
-        WHERE amount_usd_m IS NOT NULL
+    // ── Optional tables (migration 003+) — check existence first ─────────────
+    const [regsExist, modelsExist, fundingExist] = await Promise.all([
+      tableExists('regulations'),
+      tableExists('ai_models'),
+      tableExists('funding_rounds'),
+    ]);
+
+    let regulations = 0;
+    if (regsExist) {
+      const rows = await dbQuery<{ count: string }>`
+        SELECT COUNT(*)::text AS count FROM regulations
       `;
-      totalFundingUsdM = parseFloat(fundRows[0]?.total ?? '0') || 0;
-    } catch {
-      // Column may not exist yet (migration 004 pending) — degrade gracefully.
+      regulations = parseInt(rows[0]?.count ?? '0', 10) || 0;
     }
 
-    return { ...base, totalFundingUsdM };
+    let models = 0;
+    if (modelsExist) {
+      const rows = await dbQuery<{ count: string }>`
+        SELECT COUNT(*)::text AS count FROM ai_models
+      `;
+      models = parseInt(rows[0]?.count ?? '0', 10) || 0;
+    }
+
+    let fundingRounds = 0;
+    let totalFundingUsdM = 0;
+    if (fundingExist) {
+      const rows = await dbQuery<{ count: string }>`
+        SELECT COUNT(*)::text AS count FROM funding_rounds
+      `;
+      fundingRounds = parseInt(rows[0]?.count ?? '0', 10) || 0;
+
+      // Optional: total funding from normalised column (requires migration 004).
+      try {
+        const fundRows = await dbQuery<{ total: string }>`
+          SELECT COALESCE(SUM(amount_usd_m), 0)::text AS total
+          FROM funding_rounds
+          WHERE amount_usd_m IS NOT NULL
+        `;
+        totalFundingUsdM = parseFloat(fundRows[0]?.total ?? '0') || 0;
+      } catch {
+        // amount_usd_m column may not exist yet (migration 004 pending).
+      }
+    }
+
+    return { ...base, regulations, fundingRounds, models, totalFundingUsdM };
   } catch {
     return STATS_ZERO;
   }
