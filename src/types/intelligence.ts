@@ -379,6 +379,95 @@ export interface Signal {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Signal Context
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Operational status of a signal context record.
+ *
+ *   pending — row created, LLM generation not yet attempted
+ *   ready   — generation succeeded; context is safe to display
+ *   failed  — generation was attempted but errored; see generationError
+ */
+export type SignalContextStatus = 'pending' | 'ready' | 'failed';
+
+/**
+ * A single entity referenced inside a signal context.
+ *
+ * Stored as JSONB so additional fields (entity_id, sector, confidence)
+ * can be added by the generation layer without schema changes.
+ */
+export interface SignalContextEntity {
+  /** Canonical entity name, e.g. "OpenAI" */
+  name: string;
+  /** Entity type classification, e.g. "company", "regulator", "fund" */
+  type?: string;
+  /** Role the entity plays in this signal, e.g. "funding recipient" */
+  role?: string;
+}
+
+/**
+ * Structured intelligence context attached to a signal.
+ *
+ * Context is generated in the write-side pipeline only and persisted to the
+ * signal_contexts table.  Public pages read precomputed rows — no
+ * request-time generation.
+ *
+ * Each field maps to a distinct UI surface (card, detail view, digest, etc.)
+ * to allow independent rendering without re-parsing a monolithic blob.
+ */
+export interface SignalContext {
+  /** Unique context record identifier */
+  id: string;
+  /** FK reference to the parent signal */
+  signalId: string;
+
+  // ── Core context fields ───────────────────────────────────────────────────
+
+  /** One-sentence headline for signal cards, alert emails, and digests */
+  summary: string | null;
+  /** Editorial significance paragraph for detail views and dashboards */
+  whyItMatters: string | null;
+  /**
+   * Structured list of entities most affected by the signal.
+   * JSONB on disk; each element carries at minimum a `name` field.
+   */
+  affectedEntities: SignalContextEntity[];
+  /**
+   * Ordered bullet-point strings describing forward-looking implications.
+   * TEXT[] on disk; each element is a standalone plain-text fragment.
+   */
+  implications: string[];
+  /** Human-readable rationale that explains the confidence score */
+  confidenceExplanation: string | null;
+  /** Citation of the events / articles the context was derived from */
+  sourceBasis: string | null;
+
+  // ── Model metadata ────────────────────────────────────────────────────────
+
+  /** LLM provider used for generation, e.g. "openai", "groq", "anthropic" */
+  modelProvider: string;
+  /** Specific model identifier, e.g. "gpt-4o", "llama-3.1-70b-versatile" */
+  modelName: string;
+  /**
+   * Semver or hash of the prompt template used.
+   * Enables targeted regeneration when prompts are updated.
+   */
+  promptVersion: string;
+
+  // ── Operational metadata ──────────────────────────────────────────────────
+
+  /** Current pipeline / display state */
+  status: SignalContextStatus;
+  /** Error message from the last failed generation attempt; null otherwise */
+  generationError: string | null;
+  /** Timestamp when the context record was first created */
+  createdAt: ISODateString;
+  /** Timestamp of the most recent update to this record */
+  updatedAt?: ISODateString;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Trend
 // ─────────────────────────────────────────────────────────────────────────────
 

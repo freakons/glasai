@@ -17,6 +17,7 @@
  */
 
 import { dbQuery, tableExists } from '@/db/client';
+import type { SignalContext, SignalContextEntity, SignalContextStatus } from '@/types/intelligence';
 import type { Signal, SignalCategory } from '@/data/mockSignals';
 import type { AiEvent, EventType } from '@/data/mockEvents';
 import type { EntityProfile, RiskLevel } from '@/data/mockEntities';
@@ -671,4 +672,135 @@ export async function getSiteStats(): Promise<SiteStats> {
   } catch {
     return STATS_ZERO;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signal Contexts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Raw DB row returned by signal_contexts queries.
+ *
+ * affected_entities is stored as JSONB; Neon / pg parses it to a JS value
+ * automatically.  implications is a TEXT[] column and arrives as string[].
+ */
+interface SignalContextRow {
+  id: string;
+  signal_id: string;
+  summary: string | null;
+  why_it_matters: string | null;
+  affected_entities: SignalContextEntity[] | null;
+  implications: string[] | null;
+  confidence_explanation: string | null;
+  source_basis: string | null;
+  model_provider: string;
+  model_name: string;
+  prompt_version: string;
+  status: string;
+  generation_error: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+function isSignalContextStatus(v: string): v is SignalContextStatus {
+  return v === 'pending' || v === 'ready' || v === 'failed';
+}
+
+function rowToSignalContext(row: SignalContextRow): SignalContext {
+  return {
+    id:                    row.id,
+    signalId:              row.signal_id,
+    summary:               row.summary,
+    whyItMatters:          row.why_it_matters,
+    affectedEntities:      row.affected_entities ?? [],
+    implications:          row.implications ?? [],
+    confidenceExplanation: row.confidence_explanation,
+    sourceBasis:           row.source_basis,
+    modelProvider:         row.model_provider,
+    modelName:             row.model_name,
+    promptVersion:         row.prompt_version,
+    status:                isSignalContextStatus(row.status) ? row.status : 'pending',
+    generationError:       row.generation_error,
+    createdAt:             row.created_at,
+    updatedAt:             row.updated_at ?? undefined,
+  };
+}
+
+/**
+ * Fetch the intelligence context for a single signal.
+ *
+ * Returns undefined when no context row exists yet (status still 'pending')
+ * or when the table has not been migrated.
+ *
+ * @param signalId  The ID of the parent signal.
+ */
+export async function getSignalContext(signalId: string): Promise<SignalContext | undefined> {
+  if (!(await tableExists('signal_contexts'))) return undefined;
+
+  const rows = await dbQuery<SignalContextRow>`
+    SELECT
+      id,
+      signal_id,
+      summary,
+      why_it_matters,
+      affected_entities,
+      implications,
+      confidence_explanation,
+      source_basis,
+      model_provider,
+      model_name,
+      prompt_version,
+      status,
+      generation_error,
+      created_at,
+      updated_at
+    FROM signal_contexts
+    WHERE signal_id = ${signalId}
+    LIMIT 1
+  `;
+
+  return rows.length > 0 ? rowToSignalContext(rows[0]) : undefined;
+}
+
+/**
+ * Fetch signal contexts filtered by operational status.
+ *
+ * Primarily used by the generation pipeline to discover 'pending' rows
+ * that need processing, or to surface 'failed' rows for operator review.
+ *
+ * @param status  The status to filter on ('pending' | 'ready' | 'failed').
+ * @param limit   Maximum rows to return (default 50).
+ */
+export async function getSignalContextsByStatus(
+  status: SignalContextStatus,
+  limit = 50,
+): Promise<SignalContext[]> {
+  if (!(await tableExists('signal_contexts'))) return [];
+
+  const safeLimit = Math.min(Math.max(1, limit), 200);
+
+  const rows = await dbQuery<SignalContextRow>`
+    SELECT
+      id,
+      signal_id,
+      summary,
+      why_it_matters,
+      affected_entities,
+      implications,
+      confidence_explanation,
+      source_basis,
+      model_provider,
+      model_name,
+      prompt_version,
+      status,
+      generation_error,
+      created_at,
+      updated_at
+    FROM signal_contexts
+    WHERE status = ${status}
+    ORDER BY created_at DESC
+    LIMIT ${safeLimit}
+  `;
+
+  return rows.map(rowToSignalContext);
 }
