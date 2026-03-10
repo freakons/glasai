@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
-import { neon } from '@neondatabase/serverless';
+import { dbExec } from '@/db/client';
 
 export const runtime = 'nodejs';
 
@@ -80,6 +80,7 @@ const STATEMENTS = [
   `ALTER TABLE signals ADD COLUMN IF NOT EXISTS trust_score INTEGER`,
   `ALTER TABLE signals ADD COLUMN IF NOT EXISTS source      TEXT`,
   `ALTER TABLE signals ADD COLUMN IF NOT EXISTS ai_model    TEXT`,
+  `ALTER TABLE signals ADD COLUMN IF NOT EXISTS entities    JSONB`,
 
   // ── Events (legacy structured events table) ───────────────────────────────
   `CREATE TABLE IF NOT EXISTS events (
@@ -237,10 +238,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const sql = neon(process.env.DATABASE_URL!);
-
     for (const stmt of STATEMENTS) {
-      await sql(stmt);
+      await dbExec(stmt);
     }
 
     console.log('[migration] database schema verified');

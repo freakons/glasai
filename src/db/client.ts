@@ -20,13 +20,26 @@ import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 // gives one persistent connection per instance — no reconnect overhead.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Local dev: use standard pg Pool when DATABASE_URL points to a local postgres
+// (i.e. not a Neon HTTP endpoint). This avoids the HTTP-only neon() driver.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _pgPool: any | null = null;
+
+function isNeonUrl(url: string): boolean {
+  return url.includes('.neon.tech') || url.includes('neon.tech');
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type QueryFn = (strings: TemplateStringsArray, ...values: any[]) => Promise<any[]>;
+
 declare global {
   // eslint-disable-next-line no-var
   var __neonSql: NeonQueryFunction<false, false> | undefined;
+  // eslint-disable-next-line no-var
+  var __pgQueryFn: QueryFn | undefined;
 }
 
-function getClient(): NeonQueryFunction<false, false> | null {
-  if (globalThis.__neonSql) return globalThis.__neonSql;
+function getClient(): QueryFn | null {
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error(
@@ -36,8 +49,39 @@ function getClient(): NeonQueryFunction<false, false> | null {
     console.warn('[db/client] DATABASE_URL is not set — database operations will be skipped.');
     return null;
   }
-  globalThis.__neonSql = neon(process.env.DATABASE_URL);
-  return globalThis.__neonSql;
+
+  const dbUrl = process.env.DATABASE_URL;
+
+  // Use neon HTTP driver for Neon-hosted databases
+  if (isNeonUrl(dbUrl)) {
+    if (globalThis.__neonSql) return globalThis.__neonSql as QueryFn;
+    globalThis.__neonSql = neon(dbUrl);
+    return globalThis.__neonSql as QueryFn;
+  }
+
+  // Use standard pg Pool for local / non-Neon postgres
+  if (globalThis.__pgQueryFn) return globalThis.__pgQueryFn;
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Pool } = require('pg') as typeof import('pg');
+  if (!_pgPool) {
+    _pgPool = new Pool({ connectionString: dbUrl });
+  }
+  const pool = _pgPool;
+  globalThis.__pgQueryFn = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    let query = '';
+    const params: unknown[] = [];
+    strings.forEach((str, i) => {
+      query += str;
+      if (i < values.length) {
+        params.push(values[i]);
+        query += `$${params.length}`;
+      }
+    });
+    const result = await pool.query(query, params);
+    return result.rows;
+  };
+  return globalThis.__pgQueryFn;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,6 +136,24 @@ export async function dbQuery<T = Record<string, unknown>>(
 
 /** Raw Neon SQL client (null if DATABASE_URL not configured). */
 export const sql = getClient;
+
+/**
+ * Execute a raw SQL string (no parameterization).
+ * Useful for DDL statements like CREATE TABLE / ALTER TABLE.
+ */
+export async function dbExec(rawSql: string): Promise<void> {
+  const client = getClient();
+  if (!client) return;
+  // Simulate a tagged-template call with a single static string and no values
+  const fakeTemplate = Object.assign([rawSql], { raw: [rawSql] }) as TemplateStringsArray;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await withDbTimeout((client as any)(fakeTemplate));
+  } catch (err) {
+    console.error('[db/client] dbExec error:', err);
+    throw err;
+  }
+}
 
 /**
  * Execute a tagged-template SQL query and throw on any error.

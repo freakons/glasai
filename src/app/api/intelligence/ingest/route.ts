@@ -64,10 +64,12 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID();
 
   try {
+    const signalSummary = typeof summary === 'string' ? summary : title.trim();
     await dbQuery<{ id: string }>`
       INSERT INTO signals (
         id,
         title,
+        description,
         summary,
         entity_id,
         category,
@@ -80,7 +82,8 @@ export async function POST(req: NextRequest) {
       ) VALUES (
         ${id},
         ${title.trim()},
-        ${typeof summary   === 'string' ? summary   : null},
+        ${signalSummary},
+        ${signalSummary},
         ${typeof entityId  === 'string' ? entityId  : null},
         ${typeof category  === 'string' ? category  : null},
         ${confidence},

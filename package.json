@@ -45,8 +45,10 @@
         "@fontsource/dm-sans": "^5.2.8",
         "@fontsource/instrument-serif": "^5.2.8",
         "@tailwindcss/postcss": "^4.2.1",
+        "@types/pg": "^8.18.0",
         "eslint": "^9.39.4",
         "eslint-config-next": "^16.1.6",
+        "pg": "^8.20.0",
         "postcss": "^8.5.8",
         "tailwindcss": "^4.2.1",
         "typescript": "5.9.3"
