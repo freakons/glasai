@@ -16,6 +16,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getEntities } from '@/db/queries';
 import { MOCK_ENTITIES } from '@/data/mockEntities';
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
@@ -23,34 +25,50 @@ export async function GET(req: NextRequest) {
   try {
     const dbEntities = await getEntities(limit);
 
-    // If the database returned data, serve it
     if (dbEntities.length > 0) {
       return NextResponse.json({
         ok:       true,
         source:   'db',
         entities: dbEntities,
         count:    dbEntities.length,
-      });
+      }, { headers: { 'x-data-origin': 'db' } });
     }
 
-    // Empty DB — fall back to mock data
+    // Production: return explicit empty state — never mask a pipeline issue with mock data
+    if (IS_PRODUCTION) {
+      return NextResponse.json({
+        ok:       true,
+        source:   'empty',
+        entities: [],
+        count:    0,
+        message:  'No entities in database. Run the ingestion pipeline to populate.',
+      }, { headers: { 'x-data-origin': 'empty' } });
+    }
+
+    // Development: fall back to mock data so local work is unblocked
     const entities = MOCK_ENTITIES.slice(0, limit);
     return NextResponse.json({
       ok:       true,
       source:   'mock',
       entities,
       count:    entities.length,
-    });
+    }, { headers: { 'x-data-origin': 'mock' } });
   } catch (err) {
     console.error('[api/entities] error:', err);
 
-    // Error path — return mock data so the UI is never broken
+    if (IS_PRODUCTION) {
+      return NextResponse.json(
+        { ok: false, source: 'error', error: 'entities query failed', entities: [] },
+        { status: 503, headers: { 'x-data-origin': 'error' } },
+      );
+    }
+
     const entities = MOCK_ENTITIES.slice(0, limit);
     return NextResponse.json({
       ok:       true,
       source:   'mock',
       entities,
       count:    entities.length,
-    });
+    }, { headers: { 'x-data-origin': 'mock' } });
   }
 }

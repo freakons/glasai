@@ -29,7 +29,7 @@ function nodeId(n: string | RuntimeNode): string {
 
 /** Build graph data from entity profiles (entity nodes only, no links). */
 function buildGraphFromEntities(entities: EntityProfile[]): GraphData {
-  if (entities.length === 0) return mockGraphData;
+  if (entities.length === 0) return IS_PRODUCTION ? EMPTY_GRAPH : mockGraphData;
 
   const nodes: GraphNode[] = entities.map(e => ({
     id:    e.id,
@@ -59,6 +59,9 @@ function buildGraphFromEntities(entities: EntityProfile[]): GraphData {
 // Data fetching
 // ─────────────────────────────────────────────────────────────────────────────
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const EMPTY_GRAPH: GraphData = { nodes: [], links: [] };
+
 async function fetchGraphData(): Promise<GraphData> {
   try {
     const res = await fetch('/api/entities', { next: { revalidate: 120 } });
@@ -67,9 +70,10 @@ async function fetchGraphData(): Promise<GraphData> {
     if (Array.isArray(data.entities) && data.entities.length > 0) {
       return buildGraphFromEntities(data.entities as EntityProfile[]);
     }
-    return mockGraphData;
+    // In production, return empty graph instead of mock data
+    return IS_PRODUCTION ? EMPTY_GRAPH : mockGraphData;
   } catch {
-    return mockGraphData;
+    return IS_PRODUCTION ? EMPTY_GRAPH : mockGraphData;
   }
 }
 
@@ -80,7 +84,7 @@ async function fetchGraphData(): Promise<GraphData> {
 export function IntelligenceGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [graphData, setGraphData] = useState<GraphData>(mockGraphData);
+  const [graphData, setGraphData] = useState<GraphData>(IS_PRODUCTION ? EMPTY_GRAPH : mockGraphData);
 
   // Fetch entity graph data on mount; silently keep mock data if it fails
   useEffect(() => {

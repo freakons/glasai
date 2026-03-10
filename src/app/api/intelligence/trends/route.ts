@@ -50,15 +50,16 @@ export async function GET() {
       velocity_score:   row.velocity_score   ?? 0,
     }));
 
+    const source = trends.length > 0 ? 'db' : 'empty';
     return NextResponse.json(
-      { ok: true, trends, count: trends.length },
-      { headers: CACHE_HEADERS },
+      { ok: true, trends, count: trends.length, source },
+      { headers: { ...CACHE_HEADERS, 'x-data-origin': source } },
     );
   } catch (err) {
     console.error('[api/trends] DB error:', err);
     return NextResponse.json(
       { ok: false, error: 'Failed to fetch trends', trends: [] },
-      { status: 503 },
+      { status: 503, headers: { 'x-data-origin': 'error' } },
     );
   }
 }

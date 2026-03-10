@@ -62,8 +62,11 @@ async function fetchSignals(): Promise<Signal[]> {
     if (Array.isArray(data.signals) && data.signals.length > 0) {
       return data.signals as Signal[];
     }
+    // In production, return empty to show explicit empty state instead of fake data
+    if (process.env.NODE_ENV === 'production') return [];
     return MOCK_SIGNALS;
   } catch {
+    if (process.env.NODE_ENV === 'production') return [];
     return MOCK_SIGNALS;
   }
 }
@@ -195,7 +198,9 @@ function SignalStats({ signals }: { signals: Signal[] }) {
 
 export function SignalsBrowser() {
   const [active, setActive] = useState<'all' | SignalCategory>('all');
-  const [signals, setSignals] = useState<Signal[]>(MOCK_SIGNALS);
+  const [signals, setSignals] = useState<Signal[]>(
+    process.env.NODE_ENV === 'production' ? [] : MOCK_SIGNALS,
+  );
 
   // Fetch from API on mount; silently keep mock data if it fails
   useEffect(() => {

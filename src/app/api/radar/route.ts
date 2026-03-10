@@ -12,14 +12,25 @@ import { NextResponse } from 'next/server';
 import { detectAlerts } from '@/intelligence/alertEngine';
 
 export async function GET() {
-  const alerts = await detectAlerts();
+  try {
+    const alerts = await detectAlerts();
 
-  const top10 = alerts
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 10);
+    const top10 = alerts
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
 
-  return NextResponse.json({
-    timestamp: new Date().toISOString(),
-    alerts:    top10,
-  });
+    const source = top10.length > 0 ? 'db' : 'empty';
+    return NextResponse.json({
+      timestamp: new Date().toISOString(),
+      alerts:    top10,
+      count:     top10.length,
+      source,
+    }, { headers: { 'x-data-origin': source } });
+  } catch (err) {
+    console.error('[api/radar] alert engine error:', err);
+    return NextResponse.json(
+      { timestamp: new Date().toISOString(), alerts: [], count: 0, source: 'error' },
+      { status: 503, headers: { 'x-data-origin': 'error' } },
+    );
+  }
 }
