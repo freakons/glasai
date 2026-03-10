@@ -9,7 +9,7 @@ export const revalidate = 3600;
 
 export default async function HomePage() {
   // Compute live stats; gracefully fall back to siteConfig hardcoded values on any error
-  const fallbackStats = { signals: 0, companies: 0, regulations: 0, sources: 0, fundingRounds: 0 };
+  const fallbackStats = { signals: 0, companies: 0, regulations: 0, sources: 0, fundingRounds: 0, models: 0, totalFundingUsdM: 0 };
   const live = await getSiteStats().catch(() => fallbackStats);
   const signals     = live.signals     > 0 ? live.signals     : siteConfig.stats.signals;
   const companies   = live.companies   > 0 ? live.companies   : siteConfig.stats.companies;

@@ -263,9 +263,39 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_funding_rounds_company ON funding_rounds (company)`,
   `CREATE INDEX IF NOT EXISTS idx_funding_rounds_round   ON funding_rounds (round)`,
   `CREATE INDEX IF NOT EXISTS idx_funding_rounds_created ON funding_rounds (created_at DESC)`,
+
+  // ── Migration 004: funding amount normalisation ───────────────────────────
+  // Stores pre-parsed USD-million equivalent alongside the display text.
+  // Populated by the seed route/script after initial migration.
+  `ALTER TABLE funding_rounds
+     ADD COLUMN IF NOT EXISTS amount_usd_m NUMERIC(12, 2)`,
+  `CREATE INDEX IF NOT EXISTS idx_funding_rounds_amount_usd
+     ON funding_rounds (amount_usd_m DESC NULLS LAST)`,
 ];
 
-/** Table names that are created (or verified) by the migration. */
+/**
+ * Table names that are created (or verified) by this migration.
+ *
+ * ── Operator runbook ──────────────────────────────────────────────────────────
+ *
+ *  Step 1 — Apply schema (idempotent, safe to re-run):
+ *    POST /api/migrate?key=<ADMIN_SECRET>
+ *
+ *  Step 2 — Seed static data into regulations / ai_models / funding_rounds:
+ *    POST /api/seed?key=<ADMIN_SECRET>
+ *    (uses ON CONFLICT DO NOTHING — safe to re-run; only inserts missing rows)
+ *
+ *  Step 3 — Verify:
+ *    GET /api/health/db
+ *
+ *  Notes:
+ *  - Migration 004 adds the amount_usd_m column; the seed route populates it.
+ *  - Re-running /api/seed after new static data is added will insert new rows
+ *    but will NOT overwrite existing ones.  To force an update, delete the
+ *    target rows first and then re-seed.
+ *  - The ADMIN_SECRET query param must match process.env.ADMIN_SECRET.
+ * ──────────────────────────────────────────────────────────────────────────────
+ */
 const TABLES_CREATED = [
   'articles',
   'intelligence_events',
@@ -283,6 +313,8 @@ const TABLES_CREATED = [
   'regulations',
   'ai_models',
   'funding_rounds',
+  // migration 004 column additions (noted, not a new table)
+  'funding_rounds.amount_usd_m (column)',
 ];
 
 export async function POST(req: NextRequest) {

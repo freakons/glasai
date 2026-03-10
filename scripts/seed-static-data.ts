@@ -20,6 +20,7 @@ import { dbQuery } from '../src/db/client';
 import { REGULATIONS } from '../src/lib/data/regulations';
 import { MODELS }      from '../src/lib/data/models';
 import { FUNDING_ROUNDS } from '../src/lib/data/funding';
+import { parseFundingAmountUsdM } from '../src/lib/parseFundingAmount';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -79,16 +80,17 @@ async function seedModels() {
 async function seedFundingRounds() {
   log(`Seeding ${FUNDING_ROUNDS.length} funding rounds…`);
   for (const f of FUNDING_ROUNDS) {
+    const amountUsdM = parseFundingAmountUsdM(f.amount);
     const rows = await dbQuery`
-      INSERT INTO funding_rounds (id, company, icon, amount, valuation, round, date, investors, summary)
+      INSERT INTO funding_rounds (id, company, icon, amount, amount_usd_m, valuation, round, date, investors, summary)
       VALUES (
-        ${f.id}, ${f.company}, ${f.icon}, ${f.amount}, ${f.valuation},
+        ${f.id}, ${f.company}, ${f.icon}, ${f.amount}, ${amountUsdM}, ${f.valuation},
         ${f.round}, ${f.date}, ${f.investors}, ${f.summary}
       )
       ON CONFLICT (id) DO NOTHING
       RETURNING id
     `;
-    if (rows.length > 0) { inserted++; log(`  + funding: ${f.id}`); }
+    if (rows.length > 0) { inserted++; log(`  + funding: ${f.id} (amount_usd_m: ${amountUsdM ?? 'null'})`); }
     else                  { skipped++;  log(`  ~ skipped (exists): ${f.id}`); }
   }
 }

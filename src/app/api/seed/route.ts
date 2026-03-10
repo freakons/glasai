@@ -15,6 +15,7 @@ import { dbQuery } from '@/db/client';
 import { REGULATIONS } from '@/lib/data/regulations';
 import { MODELS } from '@/lib/data/models';
 import { FUNDING_ROUNDS } from '@/lib/data/funding';
+import { parseFundingAmountUsdM } from '@/lib/parseFundingAmount';
 
 export const runtime = 'nodejs';
 
@@ -63,11 +64,12 @@ export async function POST(req: NextRequest) {
 
     // ── funding_rounds ────────────────────────────────────────────────────────
     for (const f of FUNDING_ROUNDS) {
+      const amountUsdM = parseFundingAmountUsdM(f.amount);
       const rows = await dbQuery`
         INSERT INTO funding_rounds
-          (id, company, icon, amount, valuation, round, date, investors, summary)
-        VALUES (${f.id}, ${f.company}, ${f.icon}, ${f.amount}, ${f.valuation},
-                ${f.round}, ${f.date}, ${f.investors}, ${f.summary})
+          (id, company, icon, amount, amount_usd_m, valuation, round, date, investors, summary)
+        VALUES (${f.id}, ${f.company}, ${f.icon}, ${f.amount}, ${amountUsdM},
+                ${f.valuation}, ${f.round}, ${f.date}, ${f.investors}, ${f.summary})
         ON CONFLICT (id) DO NOTHING
         RETURNING id
       `;

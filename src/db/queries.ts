@@ -562,41 +562,86 @@ export async function getFundingRounds(limit = 50): Promise<FundingRound[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SiteStats {
+  /** Published / non-rejected signals in the signals table. */
   signals: number;
+  /** Total tracked entities (companies, labs, funds). */
   companies: number;
+  /** Total regulatory acts / bills tracked. */
   regulations: number;
+  /** Distinct article sources ingested. */
   sources: number;
+  /** Total funding rounds tracked. */
   fundingRounds: number;
+  /** Total AI models tracked (ai_models table). */
+  models: number;
+  /**
+   * Sum of amount_usd_m across funding_rounds.
+   * 0 when migration 004 is not yet applied or amounts not seeded.
+   */
+  totalFundingUsdM: number;
 }
+
+const STATS_ZERO: SiteStats = {
+  signals: 0, companies: 0, regulations: 0, sources: 0,
+  fundingRounds: 0, models: 0, totalFundingUsdM: 0,
+};
 
 /**
  * Compute live site-wide statistics from the database.
  *
- * Queries aggregate counts across signals, entities, regulations, funding rounds,
- * and distinct article sources.  Returns graceful fallback zeroes on failure.
+ * Core counts (signals, entities, regulations, article sources, funding rounds,
+ * ai_models) are fetched in a single query.  The funding total requires
+ * migration 004 and is fetched in a separate, independently-failing query so
+ * a missing column never corrupts the core counts.
+ *
+ * Returns graceful zero fallbacks on any failure.
  */
 export async function getSiteStats(): Promise<SiteStats> {
   try {
-    type CountRow = { signals: string; companies: string; regulations: string; sources: string; funding_rounds: string };
-    const rows = await dbQuery<CountRow>`
+    type CoreRow = {
+      signals: string; companies: string; regulations: string;
+      sources: string; funding_rounds: string; models: string;
+    };
+
+    const rows = await dbQuery<CoreRow>`
       SELECT
         (SELECT COUNT(*) FROM signals
-          WHERE status IS NULL OR status NOT IN ('rejected'))::text           AS signals,
-        (SELECT COUNT(*) FROM entities)::text                                 AS companies,
-        (SELECT COUNT(*) FROM regulations)::text                              AS regulations,
-        (SELECT COUNT(DISTINCT source) FROM articles)::text                   AS sources,
-        (SELECT COUNT(*) FROM funding_rounds)::text                           AS funding_rounds
+          WHERE status IS NULL OR status NOT IN ('rejected'))::text  AS signals,
+        (SELECT COUNT(*) FROM entities)::text                        AS companies,
+        (SELECT COUNT(*) FROM regulations)::text                     AS regulations,
+        (SELECT COUNT(DISTINCT source) FROM articles)::text          AS sources,
+        (SELECT COUNT(*) FROM funding_rounds)::text                  AS funding_rounds,
+        (SELECT COUNT(*) FROM ai_models)::text                       AS models
     `;
-    if (rows.length === 0) return { signals: 0, companies: 0, regulations: 0, sources: 0, fundingRounds: 0 };
+
+    if (rows.length === 0) return STATS_ZERO;
     const r = rows[0];
-    return {
-      signals:      parseInt(r.signals,      10) || 0,
-      companies:    parseInt(r.companies,    10) || 0,
-      regulations:  parseInt(r.regulations,  10) || 0,
-      sources:      parseInt(r.sources,      10) || 0,
+
+    const base = {
+      signals:       parseInt(r.signals,        10) || 0,
+      companies:     parseInt(r.companies,      10) || 0,
+      regulations:   parseInt(r.regulations,    10) || 0,
+      sources:       parseInt(r.sources,        10) || 0,
       fundingRounds: parseInt(r.funding_rounds, 10) || 0,
+      models:        parseInt(r.models,         10) || 0,
     };
+
+    // Optional: total funding from normalised column (requires migration 004).
+    // Independent try/catch — a missing column never breaks core counts.
+    let totalFundingUsdM = 0;
+    try {
+      const fundRows = await dbQuery<{ total: string }>`
+        SELECT COALESCE(SUM(amount_usd_m), 0)::text AS total
+        FROM funding_rounds
+        WHERE amount_usd_m IS NOT NULL
+      `;
+      totalFundingUsdM = parseFloat(fundRows[0]?.total ?? '0') || 0;
+    } catch {
+      // Column may not exist yet (migration 004 pending) — degrade gracefully.
+    }
+
+    return { ...base, totalFundingUsdM };
   } catch {
-    return { signals: 0, companies: 0, regulations: 0, sources: 0, fundingRounds: 0 };
+    return STATS_ZERO;
   }
 }
