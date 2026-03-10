@@ -19,7 +19,14 @@ export const maxDuration = 10; // Vercel Hobby plan limit
 function isAuthorized(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET || '';
   if (!expected) return true; // No secret configured — allow in local dev
-  return req.headers.get('x-vercel-cron-secret') === expected;
+
+  // Vercel cron scheduler
+  const userAgent = req.headers.get('user-agent') || '';
+  if (userAgent.includes('vercel-cron')) return true;
+
+  const cronHeader  = req.headers.get('x-vercel-cron-secret') || '';
+  const querySecret = new URL(req.url).searchParams.get('secret') || '';
+  return cronHeader === expected || querySecret === expected;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,6 +34,7 @@ function isAuthorized(req: NextRequest): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now();
   const reqId = createRequestId();
   validateEnvironment(['CRON_SECRET', 'GNEWS_API_KEY', 'DATABASE_URL']);
 
@@ -37,28 +45,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Step 1: Ingestion ─────────────────────────────────────────────────────
-  const { ingested } = await ingestGNews();
+  // ── Step 1: Ingestion (now writes to canonical events table) ──────────────
+  const ingestResult = await ingestGNews();
 
-  // ── Step 2: Signal generation ─────────────────────────────────────────────
+  // ── Step 2: Signal generation from events ─────────────────────────────────
   const events  = await getRecentEvents(500);
   const signals = generateSignalsFromEvents(events);
   const signalsGenerated = await saveSignals(signals);
 
   recordPipelineRun(signalsGenerated);
+
+  const durationMs = Date.now() - t0;
   logWithRequestId(
     reqId,
     'pipeline/run',
-    `ingested=${ingested} events=${events.length} signals=${signalsGenerated}`,
+    `ingested=${ingestResult.ingested} events=${events.length} signals=${signalsGenerated} ms=${durationMs}`,
   );
 
   await enqueue(async () => {
     await runPipelineSafe();
   });
 
-  return Response.json({
+  return NextResponse.json({
     status:  'ok',
     message: 'pipeline executed',
+    diagnostics: {
+      gnewsFetched: ingestResult.total,
+      gnewsIngested: ingestResult.ingested,
+      gnewsSkipped: ingestResult.skipped,
+      eventsLoaded: events.length,
+      signalsGenerated,
+      durationMs,
+    },
   });
 }
 

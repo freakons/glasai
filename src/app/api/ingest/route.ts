@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { ingestGNews } from '@/services/ingestion/gnewsFetcher';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { dbQuery } from '@/db/client';
 
 export const maxDuration = 10; // Vercel Hobby plan limit
 
@@ -55,10 +56,26 @@ export async function GET(req: NextRequest) {
     fetch(`${baseUrl}/api/signals?secret=${secret}`, { method: 'GET' })
       .catch((err) => console.error('[ingest] signals trigger failed:', err));
 
-    logWithRequestId(reqId, 'ingest', `ingested=${result.ingested} skipped=${result.skipped} ms=${Date.now() - t0}`);
+    // ── Post-ingest diagnostics ──────────────────────────────────────────────
+    let diagnostics: Record<string, unknown> = {};
+    try {
+      const eventsCount = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`;
+      const latestEvent = await dbQuery<{ id: string; type: string; title: string; company: string; timestamp: string }>`
+        SELECT id, type, title, company, timestamp FROM events ORDER BY timestamp DESC LIMIT 1
+      `;
+      diagnostics = {
+        eventsTableCount: parseInt(eventsCount[0]?.count ?? '0', 10),
+        latestEvent: latestEvent[0] ?? null,
+      };
+    } catch {
+      diagnostics = { error: 'diagnostics query failed' };
+    }
+
+    logWithRequestId(reqId, 'ingest', `total=${result.total} ingested=${result.ingested} skipped=${result.skipped} ms=${Date.now() - t0}`);
     return NextResponse.json({
       ok: true,
       ...result,
+      diagnostics,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

@@ -171,24 +171,37 @@ export async function POST(req: NextRequest) {
   });
 
   // ── Post-run diagnostics ──────────────────────────────────────────────────
-  let signalDiagnostics: {
-    totalSignals: number | string;
-    latestSignal: Record<string, unknown> | null;
-  } = { totalSignals: 'unknown', latestSignal: null };
+  let pipelineDiagnostics: Record<string, unknown> = {};
 
   try {
-    const countRows  = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`;
-    const sampleRows = await dbQuery<Record<string, unknown>>`
+    const [signalCount, trendCount, insightCount, eventCount] = await Promise.all([
+      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`,
+      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM trends`,
+      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM insights`,
+      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`,
+    ]);
+    const latestSignal = await dbQuery<Record<string, unknown>>`
       SELECT id, title, status, category, confidence, trust_score, created_at
-      FROM signals
-      ORDER BY created_at DESC
-      LIMIT 1
+      FROM signals ORDER BY created_at DESC LIMIT 1
     `;
-    signalDiagnostics = {
-      totalSignals: parseInt(countRows[0]?.count ?? '0', 10),
-      latestSignal: sampleRows[0] ?? null,
+    const latestTrend = await dbQuery<Record<string, unknown>>`
+      SELECT topic, category, signal_count, confidence, created_at
+      FROM trends ORDER BY created_at DESC LIMIT 1
+    `;
+    const latestInsight = await dbQuery<Record<string, unknown>>`
+      SELECT title, category, confidence, created_at
+      FROM insights ORDER BY created_at DESC LIMIT 1
+    `;
+    pipelineDiagnostics = {
+      totalEvents:   parseInt(eventCount[0]?.count ?? '0', 10),
+      totalSignals:  parseInt(signalCount[0]?.count ?? '0', 10),
+      totalTrends:   parseInt(trendCount[0]?.count ?? '0', 10),
+      totalInsights: parseInt(insightCount[0]?.count ?? '0', 10),
+      latestSignal:  latestSignal[0] ?? null,
+      latestTrend:   latestTrend[0] ?? null,
+      latestInsight: latestInsight[0] ?? null,
     };
-    console.log(`[intelligence/run] post-run diagnostics: totalSignals=${signalDiagnostics.totalSignals}`);
+    console.log(`[intelligence/run] post-run diagnostics: events=${pipelineDiagnostics.totalEvents} signals=${pipelineDiagnostics.totalSignals} trends=${pipelineDiagnostics.totalTrends} insights=${pipelineDiagnostics.totalInsights}`);
   } catch (err) {
     console.warn('[intelligence/run] diagnostics query failed:', err);
   }
@@ -199,7 +212,7 @@ export async function POST(req: NextRequest) {
     stages,
     totalMs,
     timestamp: new Date().toISOString(),
-    diagnostics: signalDiagnostics,
+    diagnostics: pipelineDiagnostics,
   }, {
     // Return 207 Multi-Status when some stages failed but others succeeded
     status: anyError ? 207 : 200,

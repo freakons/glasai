@@ -1,5 +1,7 @@
-import { classifyArticle } from '../intelligence/classifier';
+import { classifyArticle, type IntelligenceCategory } from '../intelligence/classifier';
 import { dbQuery as query } from '../../db/client';
+import { saveEvent } from '../storage/eventStore';
+import type { Event, EventType } from '@/types/intelligence';
 
 interface GNewsArticle {
   title: string;
@@ -37,15 +39,39 @@ async function withTimeout<T>(
   return Promise.race([promise, timeout]) as Promise<T>;
 }
 
-export async function ingestGNews(): Promise<{ ingested: number; skipped: number }> {
+/** Map the classifier's IntelligenceCategory → canonical EventType for the events table. */
+function categoryToEventType(category: IntelligenceCategory): EventType {
+  switch (category) {
+    case 'MODEL_RELEASE': return 'model_release';
+    case 'FUNDING':       return 'funding';
+    case 'REGULATION':    return 'regulation';
+    case 'POLICY':        return 'policy';
+    case 'RESEARCH':      return 'research_breakthrough';
+    case 'COMPANY_MOVE':  return 'company_strategy';
+    default:              return 'other';
+  }
+}
+
+/** Deterministic event ID from URL so duplicates are idempotent. */
+function urlToEventId(url: string): string {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    hash = (hash << 5) - hash + url.charCodeAt(i);
+    hash |= 0;
+  }
+  return `gnews_${Math.abs(hash).toString(16).padStart(8, '0')}`;
+}
+
+export async function ingestGNews(): Promise<{ ingested: number; skipped: number; total: number }> {
   const key = process.env.GNEWS_API_KEY;
   if (!key) {
     console.warn('[ingest] GNEWS_API_KEY not set');
-    return { ingested: 0, skipped: 0 };
+    return { ingested: 0, skipped: 0, total: 0 };
   }
 
   let ingested = 0;
   let skipped = 0;
+  let total = 0;
 
   for (const q of QUERIES) {
     try {
@@ -67,10 +93,43 @@ export async function ingestGNews(): Promise<{ ingested: number; skipped: number
       const articles = data.articles || [];
 
       for (const article of articles) {
+        total++;
         const category = classifyArticle(
           article.title + ' ' + (article.description || '')
         );
+        const eventType = categoryToEventType(category);
 
+        // Build a canonical Event and write to the events table
+        const event: Event = {
+          id:          urlToEventId(article.url),
+          type:        eventType,
+          company:     article.source.name,
+          title:       article.title,
+          description: article.description || '',
+          timestamp:   article.publishedAt,
+          tags:        [q],
+          sourceArticle: {
+            id:     urlToEventId(article.url),
+            title:  article.title,
+            url:    article.url,
+            source: article.source.name,
+          },
+        };
+
+        try {
+          const inserted = await saveEvent(event);
+          if (inserted) {
+            ingested++;
+          } else {
+            skipped++; // duplicate, ON CONFLICT DO NOTHING
+          }
+        } catch {
+          skipped++;
+        }
+
+        // Also write to intelligence_events for backward compatibility
+        // (snapshot reads from this table). This is a transitional write
+        // that can be removed once /api/snapshot is migrated.
         try {
           await query`
             INSERT INTO intelligence_events (
@@ -86,9 +145,8 @@ export async function ingestGNews(): Promise<{ ingested: number; skipped: number
             )
             ON CONFLICT (source_url) DO NOTHING
           `;
-          ingested++;
         } catch {
-          skipped++;
+          // Non-critical — intelligence_events is a legacy silo
         }
       }
     } catch (err) {
@@ -96,6 +154,6 @@ export async function ingestGNews(): Promise<{ ingested: number; skipped: number
     }
   }
 
-  console.log(`[ingest] Done. ingested=${ingested} skipped=${skipped}`);
-  return { ingested, skipped };
+  console.log(`[ingest] Done. total=${total} ingested=${ingested} skipped=${skipped}`);
+  return { ingested, skipped, total };
 }
