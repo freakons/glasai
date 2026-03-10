@@ -3,7 +3,9 @@ export const runtime = 'nodejs';
  * Omterminal — Events API Route
  *
  * Returns AI ecosystem events in the frontend AiEvent format.
- * Falls back to mock data when the database is unavailable or empty.
+ * In production, never falls back to mock data — callers receive an explicit
+ * source indicator ('db' | 'empty' | 'mock') so the UI can show the right
+ * empty state rather than silently serving fake data.
  *
  * GET /api/events
  *   Returns up to `limit` events (default 50).
@@ -15,6 +17,8 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { getEvents } from '@/db/queries';
 import { MOCK_EVENTS } from '@/data/mockEvents';
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -30,27 +34,46 @@ export async function GET(req: NextRequest) {
         source: 'db',
         events: dbEvents,
         count:  dbEvents.length,
-      });
+      }, { headers: { 'x-data-origin': 'db' } });
     }
 
-    // Empty DB — fall back to mock data
+    // Production: return explicit empty state — never mask a pipeline issue with mock data
+    if (IS_PRODUCTION) {
+      return NextResponse.json({
+        ok:      true,
+        source:  'empty',
+        events:  [],
+        count:   0,
+        message: 'No events in database. Run /api/ingest to populate.',
+      }, { headers: { 'x-data-origin': 'empty' } });
+    }
+
+    // Development: fall back to mock data so local work is unblocked
     const events = MOCK_EVENTS.slice(0, limit);
     return NextResponse.json({
       ok:     true,
       source: 'mock',
       events,
       count:  events.length,
-    });
+    }, { headers: { 'x-data-origin': 'mock' } });
   } catch (err) {
     console.error('[api/events] error:', err);
 
-    // Error path — return mock data so the UI is never broken
+    // Production: surface the error clearly instead of silently serving stale data
+    if (IS_PRODUCTION) {
+      return NextResponse.json(
+        { ok: false, source: 'error', error: 'events query failed', events: [] },
+        { status: 503, headers: { 'x-data-origin': 'error' } },
+      );
+    }
+
+    // Development: fall back to mock data so local work is unblocked
     const events = MOCK_EVENTS.slice(0, limit);
     return NextResponse.json({
       ok:     true,
       source: 'mock',
       events,
       count:  events.length,
-    });
+    }, { headers: { 'x-data-origin': 'mock' } });
   }
 }

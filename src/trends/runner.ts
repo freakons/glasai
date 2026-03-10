@@ -63,6 +63,8 @@ const MOCK_TREND_SIGNALS: TrendSignal[] = [
   },
 ];
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 // ── Signal loader ─────────────────────────────────────────────────────────────
 
 async function loadRecentSignals(): Promise<TrendSignal[]> {
@@ -84,7 +86,14 @@ async function loadRecentSignals(): Promise<TrendSignal[]> {
   `;
 
   if (rows.length === 0) {
-    console.log('[trends/runner] no DB signals found — using mock data');
+    if (IS_PRODUCTION) {
+      // Production: return empty — do not use mock data that would generate
+      // fake trends and mislead downstream insight generation.
+      console.log('[trends/runner] no DB signals found in last 24h — returning empty (production)');
+      return [];
+    }
+    // Development: use mock data so local work is unblocked
+    console.log('[trends/runner] no DB signals found — using mock data (development)');
     return MOCK_TREND_SIGNALS;
   }
 

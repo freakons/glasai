@@ -46,6 +46,8 @@ const MOCK_TRENDS: TrendResult[] = [
   },
 ];
 
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 // ── Trend loader ──────────────────────────────────────────────────────────────
 
 async function loadTrends(): Promise<TrendResult[]> {
@@ -57,7 +59,14 @@ async function loadTrends(): Promise<TrendResult[]> {
   `;
 
   if (rows.length === 0) {
-    console.log('[insights/runner] no DB trends found — using mock data');
+    if (IS_PRODUCTION) {
+      // Production: return empty — do not generate insights from fake trends.
+      // The pipeline will populate the trends table once real signals arrive.
+      console.log('[insights/runner] no DB trends found — returning empty (production)');
+      return [];
+    }
+    // Development: use mock data so local work is unblocked
+    console.log('[insights/runner] no DB trends found — using mock data (development)');
     return MOCK_TRENDS;
   }
 
