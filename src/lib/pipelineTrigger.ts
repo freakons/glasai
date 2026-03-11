@@ -91,20 +91,32 @@ async function runPipeline(): Promise<void> {
   try {
     // Dynamic imports keep these heavy modules out of the /api/opportunities
     // bundle — they are only loaded when this function actually executes.
+    const { ingestRss }                 = await import('@/services/ingestion/rssIngester');
     const { ingestGNews }               = await import('@/services/ingestion/gnewsFetcher');
     const { getRecentEvents }           = await import('@/services/storage/eventStore');
     const { generateSignalsFromEvents } = await import('@/services/signals/signalEngine');
     const { saveSignals }               = await import('@/services/storage/signalStore');
     const { recordPipelineRun }         = await import('@/lib/pipelineHealth');
 
+    // RSS (primary — no quota limits)
+    let rssArticlesNew = 0;
+    try {
+      const rssResult = await ingestRss();
+      rssArticlesNew = rssResult.articlesNew;
+    } catch (rssErr) {
+      console.error('[pipeline] self-heal RSS error:', rssErr instanceof Error ? rssErr.message : String(rssErr));
+    }
+
+    // GNews (secondary — quota-aware, reduced queries via GNEWS_MAX_QUERIES)
     const { ingested }  = await ingestGNews();
+
     const events        = await getRecentEvents(500);
     const signals       = generateSignalsFromEvents(events);
     const signalsSaved  = await saveSignals(signals);
 
     recordPipelineRun(signalsSaved);
     console.log(
-      `[pipeline] self-heal complete — ingested=${ingested} events=${events.length} signals=${signalsSaved}`,
+      `[pipeline] self-heal complete — rssArticles=${rssArticlesNew} gnewsIngested=${ingested} events=${events.length} signals=${signalsSaved}`,
     );
 
     // ── Context generation stage ───────────────────────────────────────────

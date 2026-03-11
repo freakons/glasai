@@ -1,11 +1,8 @@
 /**
  * Omterminal — RSS Fetcher
  *
- * Defines the interface and placeholder logic for fetching and normalising
- * articles from RSS/Atom feeds tracked in the source registry.
- *
- * This module is intentionally structural at this stage.
- * Full RSS parsing (xml2js / fast-xml-parser) will be wired in a future step.
+ * Fetches and normalises articles from RSS/Atom feeds tracked in the source
+ * registry. Uses the rss-parser npm package (already a project dependency).
  *
  * Architecture:
  *   Source (registry) → fetchArticlesFromSource() → Article[]
@@ -15,29 +12,9 @@
  * event extraction pipeline.
  */
 
+import Parser from 'rss-parser';
 import type { Source } from '../../config/intelligenceSources';
 import type { Article, ArticleCategory } from '../../types/intelligence';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal RSS types (raw feed shapes before normalisation)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Represents a single item as parsed from an RSS 2.0 or Atom feed. */
-interface RawFeedItem {
-  title: string;
-  link: string;
-  pubDate?: string;
-  description?: string;
-  content?: string;
-  author?: string;
-  categories?: string[];
-}
-
-/** Parsed representation of a full RSS/Atom feed. */
-interface ParsedFeed {
-  title: string;
-  items: RawFeedItem[];
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result type
@@ -67,14 +44,6 @@ export interface FetchResult {
  * @param source  A Source object from the INTELLIGENCE_SOURCES registry.
  * @param limit   Maximum number of articles to return (default: 20).
  * @returns       A FetchResult containing normalised articles or an error.
- *
- * @example
- * ```ts
- * import { getSourceById } from '../../config/intelligenceSources';
- * const source = getSourceById('openai_blog')!;
- * const result = await fetchArticlesFromSource(source);
- * console.log(result.articles);
- * ```
  */
 export async function fetchArticlesFromSource(
   source: Source,
@@ -83,12 +52,11 @@ export async function fetchArticlesFromSource(
   const fetchedAt = new Date().toISOString();
 
   try {
-    // ── Step 1: Fetch the raw RSS feed ───────────────────────────────────────
     const feed = await fetchRawFeed(source.rss);
 
-    // ── Step 2: Normalise each item into an Article ──────────────────────────
     const articles: Article[] = feed.items
       .slice(0, limit)
+      .filter((item) => item.link && item.title)
       .map((item) => normaliseItem(item, source));
 
     return {
@@ -99,7 +67,7 @@ export async function fetchArticlesFromSource(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[rssFetcher] Failed to fetch source "${source.id}": ${message}`);
+    console.error(`[rssFetcher] Failed to fetch "${source.id}" (${source.rss}): ${message}`);
     return {
       sourceId: source.id,
       articles: [],
@@ -131,49 +99,70 @@ export async function fetchArticlesFromSources(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal helpers (placeholder implementations)
+// Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** rss-parser item shape after parsing */
+interface ParsedItem {
+  title: string;
+  link: string;
+  pubDate?: string;
+  isoDate?: string;
+  description?: string;
+  contentSnippet?: string;
+  content?: string;
+  creator?: string;
+  categories?: string[];
+}
+
+/** Parsed feed */
+interface ParsedFeed {
+  title: string;
+  items: ParsedItem[];
+}
+
 /**
- * Fetches and parses an RSS/Atom feed from a URL.
- *
- * TODO: Replace this placeholder with a real XML parser.
- *       Recommended libraries: fast-xml-parser, @extractus/feed-extractor
- *
- * @param url  RSS/Atom feed URL.
+ * Fetches and parses an RSS/Atom feed using rss-parser.
+ * Races against a 10-second timeout to avoid hanging on slow/dead feeds.
  */
 async function fetchRawFeed(url: string): Promise<ParsedFeed> {
-  const response = await fetch(url, {
+  const parser = new Parser({
     headers: {
       'User-Agent': 'Omterminal/1.0 (AI Intelligence Platform; +https://omterminal.com)',
-      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml',
+      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
     },
-    // Abort slow feeds after 10 seconds
-    signal: AbortSignal.timeout(10_000),
+    customFields: {
+      item: ['dc:creator', 'content:encoded'],
+    },
   });
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} fetching RSS feed: ${url}`);
-  }
+  // Race the parse against a 10-second timeout
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('RSS feed timed out after 10s')), 10_000)
+  );
 
-  // Placeholder: return empty feed until XML parser is wired in.
-  // The real implementation will parse response.text() here.
-  void (await response.text());
+  const feed = await Promise.race([parser.parseURL(url), timeout]);
 
   return {
-    title: '',
-    items: [],
+    title: feed.title ?? '',
+    items: (feed.items ?? []).map((item) => ({
+      title: (item.title ?? '').trim(),
+      link: item.link ?? '',
+      pubDate: item.pubDate ?? item.isoDate,
+      isoDate: item.isoDate,
+      description: item.contentSnippet ?? item.summary,
+      contentSnippet: item.contentSnippet,
+      content: item['content:encoded'] ?? item.content ?? item.contentSnippet,
+      creator: item['dc:creator'] ?? item.creator,
+      categories: item.categories,
+    })),
   };
 }
 
 /**
- * Maps a raw RSS item to the canonical Article type.
- *
- * Infers the ArticleCategory from the source category where possible;
- * the classifier in src/services/intelligence/classifier.ts will refine
- * this during pipeline processing.
+ * Maps a parsed RSS item to the canonical Article type.
  */
-function normaliseItem(item: RawFeedItem, source: Source): Article {
+function normaliseItem(item: ParsedItem, source: Source): Article {
   const id = generateArticleId(item.link);
 
   return {
@@ -181,26 +170,25 @@ function normaliseItem(item: RawFeedItem, source: Source): Article {
     title: item.title.trim(),
     source: source.name,
     url: item.link,
-    publishedAt: parseDate(item.pubDate),
-    content: item.content || item.description || '',
-    excerpt: item.description?.slice(0, 300),
+    publishedAt: parseDate(item.pubDate ?? item.isoDate),
+    content: item.content || item.contentSnippet || item.description || '',
+    excerpt: (item.contentSnippet || item.description)?.slice(0, 300),
     category: inferCategory(source),
-    authors: item.author ? [item.author] : undefined,
+    authors: item.creator ? [item.creator] : undefined,
     tags: item.categories,
   };
 }
 
 /**
- * Generates a stable article id from its URL using a simple hash.
- * Avoids importing a full crypto library for now.
+ * Generates a stable article ID from its URL using a simple hash.
  */
 function generateArticleId(url: string): string {
   let hash = 0;
   for (let i = 0; i < url.length; i++) {
     hash = (hash << 5) - hash + url.charCodeAt(i);
-    hash |= 0; // Convert to 32-bit int
+    hash |= 0;
   }
-  return `art_${Math.abs(hash).toString(36)}`;
+  return `art_${Math.abs(hash).toString(16).padStart(8, '0')}`;
 }
 
 /**
@@ -215,7 +203,7 @@ function parseDate(raw?: string): string {
 
 /**
  * Infers a broad ArticleCategory from the source's category.
- * The intelligence classifier will apply more precise categorisation later.
+ * The classifier in classifier.ts will apply more precise categorisation later.
  */
 function inferCategory(source: Source): ArticleCategory {
   const map: Record<string, ArticleCategory> = {

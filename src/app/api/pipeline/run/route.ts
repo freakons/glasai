@@ -43,6 +43,7 @@ import { NextRequest, NextResponse }           from 'next/server';
 import { validateEnvironment }                  from '@/lib/env';
 import { createRequestId, logWithRequestId }    from '@/lib/requestId';
 import { ingestGNews }                          from '@/services/ingestion/gnewsFetcher';
+import { ingestRss }                            from '@/services/ingestion/rssIngester';
 import { getRecentEvents }                      from '@/services/storage/eventStore';
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
 import { saveSignals }                          from '@/services/storage/signalStore';
@@ -279,8 +280,59 @@ export async function POST(req: NextRequest) {
   );
 
   async function executeStages(): Promise<void> {
-    // Stage 1 — Ingestion
-    const ingest = await runStage('ingest', () => ingestGNews(), TIMEOUT.INGEST);
+    // Stage 1 — Ingestion (RSS primary + GNews secondary)
+    const ingest = await runStage('ingest', async () => {
+      // Stage 1a: RSS ingestion (primary — no API quota limits)
+      let rssResult = {
+        sourcesAttempted: 0, sourcesFailed: 0, sourcesRateLimited: 0, sourcesEmpty: 0,
+        articlesNew: 0, articlesDeduped: 0, eventsNew: 0, eventsDeduped: 0,
+      };
+      try {
+        rssResult = await ingestRss();
+      } catch (rssErr) {
+        console.error('[pipeline] RSS ingestion threw unexpectedly:', rssErr instanceof Error ? rssErr.message : String(rssErr));
+      }
+
+      // Stage 1b: GNews ingestion (secondary — quota-aware, reduced queries)
+      const gnewsResult = await ingestGNews();
+
+      if (gnewsResult.rateLimited) {
+        console.warn('[pipeline] GNews rate-limited — relying on RSS sources this run');
+      }
+
+      const totalFetched   = rssResult.articlesNew + rssResult.articlesDeduped + gnewsResult.total;
+      const totalInserted  = rssResult.articlesNew + gnewsResult.ingested;
+      const totalDeduped   = rssResult.articlesDeduped + gnewsResult.skipped;
+
+      if (totalInserted === 0 && totalFetched === 0) {
+        console.warn('[pipeline] ingest stage: zero articles from all sources — possible source starvation');
+      } else if (totalInserted === 0) {
+        console.log(`[pipeline] ingest stage: ${totalFetched} fetched but all deduped (pipeline already up-to-date)`);
+      }
+
+      return {
+        total: totalFetched,
+        ingested: totalInserted,
+        skipped: totalDeduped,
+        sources: {
+          rss: {
+            sourcesAttempted: rssResult.sourcesAttempted,
+            sourcesFailed: rssResult.sourcesFailed,
+            sourcesRateLimited: rssResult.sourcesRateLimited,
+            sourcesEmpty: rssResult.sourcesEmpty,
+            articlesNew: rssResult.articlesNew,
+            eventsNew: rssResult.eventsNew,
+          },
+          gnews: {
+            queriesAttempted: gnewsResult.queriesAttempted,
+            total: gnewsResult.total,
+            ingested: gnewsResult.ingested,
+            rateLimited: gnewsResult.rateLimited,
+          },
+        },
+      };
+    }, TIMEOUT.INGEST);
+
     if (ingest.error) {
       stages.push({ stage: 'ingest', status: 'error', durationMs: ingest.durationMs, error: ingest.error });
       errorsCount++;
@@ -292,6 +344,7 @@ export async function POST(req: NextRequest) {
       stages.push({
         stage: 'ingest', status: 'ok', durationMs: ingest.durationMs,
         articlesFetched, articlesInserted, articlesDeduped,
+        sources: r.sources,
       });
     }
 
