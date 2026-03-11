@@ -35,6 +35,7 @@ import { getRecentEvents } from '@/services/storage/eventStore';
 import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
 import { getSignals } from '@/db/queries';
+import { parseSignalMode, DEFAULT_SIGNAL_MODE } from '@/lib/signals/signalModes';
 
 export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for larger event lookbacks
 
@@ -69,33 +70,43 @@ export async function GET(req: NextRequest) {
 
   if (!isAuthRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
-    const redisCacheKey = limit === 50 ? 'signals:latest' : `signals:list:limit:${limit}`;
+    // Parse signal quality mode from query param; default to standard for public surfaces.
+    const mode  = parseSignalMode(searchParams.get('mode'));
+    // Include mode in cache key so raw/standard/premium never serve each other's cached data.
+    const cacheBase = mode === DEFAULT_SIGNAL_MODE ? '' : `:mode:${mode}`;
+    const redisCacheKey = limit === 50
+      ? `signals:latest${cacheBase}`
+      : `signals:list:limit:${limit}${cacheBase}`;
     const debug = searchParams.get('debug') === 'true';
 
     try {
       // 1. Edge cache (KV-backed, cross-region)
-      const edgeCached = await getEdgeSignals();
-      if (edgeCached) {
-        logWithRequestId(reqId, 'signals', `cache_hit source=edge ms=${Date.now() - t0}`);
-        return NextResponse.json(edgeCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+      // Only use edge cache for the default mode to keep it simple.
+      if (mode === DEFAULT_SIGNAL_MODE) {
+        const edgeCached = await getEdgeSignals();
+        if (edgeCached) {
+          logWithRequestId(reqId, 'signals', `cache_hit source=edge mode=${mode} ms=${Date.now() - t0}`);
+          return NextResponse.json(edgeCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+        }
       }
 
       // 2. Redis cache (Upstash, cross-region, persistent)
       const redisCached = await redisGet(redisCacheKey);
       if (redisCached) {
-        logWithRequestId(reqId, 'signals', `cache_hit source=redis ms=${Date.now() - t0}`);
+        logWithRequestId(reqId, 'signals', `cache_hit source=redis mode=${mode} ms=${Date.now() - t0}`);
         return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
       }
 
       // 3. In-process memory cache (per-instance, 5 s)
-      const cached = getCache('signals', 5000);
+      const memCacheKey = `signals:${mode}`;
+      const cached = getCache(memCacheKey, 5000);
       if (cached) {
-        logWithRequestId(reqId, 'signals', `cache_hit source=memory ms=${Date.now() - t0}`);
+        logWithRequestId(reqId, 'signals', `cache_hit source=memory mode=${mode} ms=${Date.now() - t0}`);
         return NextResponse.json(cached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
       }
 
-      // 4. Database query
-      const dbSignals = await getSignals(limit);
+      // 4. Database query — mode-aware filtering applied inside getSignals()
+      const dbSignals = await getSignals(limit, mode);
 
       // Diagnostics: log table state for debugging
       let diagnostics: Record<string, unknown> | undefined;
@@ -115,12 +126,13 @@ export async function GET(req: NextRequest) {
       }
 
       if (dbSignals.length > 0) {
-        const payload: Record<string, unknown> = { ok: true, source: 'db', signals: dbSignals, count: dbSignals.length };
+        const payload: Record<string, unknown> = { ok: true, source: 'db', mode, signals: dbSignals, count: dbSignals.length };
         if (debug && diagnostics) payload.diagnostics = diagnostics;
-        await setEdgeSignals(payload);
+        // Only populate edge cache for the default mode (avoids edge cache thrash across modes).
+        if (mode === DEFAULT_SIGNAL_MODE) await setEdgeSignals(payload);
         await redisSet(redisCacheKey, payload, TTL.SIGNALS);
-        setCache('signals', payload);
-        logWithRequestId(reqId, 'signals', `cache_miss source=db signals=${dbSignals.length} ms=${Date.now() - t0}`);
+        setCache(memCacheKey, payload);
+        logWithRequestId(reqId, 'signals', `cache_miss source=db mode=${mode} signals=${dbSignals.length} ms=${Date.now() - t0}`);
         return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db' } });
       }
 
@@ -167,20 +179,24 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Engine mode: run signals generation ───────────────────────────────────
+  // Parse mode for the engine run; defaults to standard to preserve existing behaviour.
+  const engineMode = parseSignalMode(new URL(req.url).searchParams.get('mode'));
+
   try {
     // 1. Fetch recent events (look back over 30 days to catch all windows)
     const events = await getRecentEvents(500);
 
-    // 2. Run signals engine
-    const signals = generateSignalsFromEvents(events);
+    // 2. Run signals engine with mode-aware generation thresholds
+    const signals = generateSignalsFromEvents(events, engineMode);
 
     // 3. Persist new signals (idempotent via ON CONFLICT DO NOTHING)
     const inserted = await saveSignals(signals);
 
-    logWithRequestId(reqId, 'signals', `engine: events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
+    logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
 
     return NextResponse.json({
       ok:               true,
+      mode:             engineMode,
       eventsAnalysed:   events.length,
       signalsGenerated: signals.length,
       signalsInserted:  inserted,

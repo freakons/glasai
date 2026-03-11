@@ -19,6 +19,7 @@
 import { dbQuery, tableExists } from '@/db/client';
 import type { SignalContext, SignalContextEntity, SignalContextStatus } from '@/types/intelligence';
 import type { Signal, SignalCategory } from '@/data/mockSignals';
+import { type SignalMode, getModeConfig, DEFAULT_SIGNAL_MODE } from '@/lib/signals/signalModes';
 import type { AiEvent, EventType } from '@/data/mockEvents';
 import type { EntityProfile, RiskLevel } from '@/data/mockEntities';
 import type { Article } from '@/lib/data/news';
@@ -253,12 +254,91 @@ function engineTypeToCategory(type: string | null): string {
  * When the table is absent the function falls back to a plain signals query
  * so callers remain unaffected during incremental migration.
  *
- * @param limit  Maximum signals to return (default 50).
+ * The `mode` parameter controls which signals are eligible for display:
+ *   raw      — all non-rejected signals, no confidence filter (internal/debug)
+ *   standard — auto/published signals with confidence ≥ 65 (public default)
+ *   premium  — auto/published signals with confidence ≥ 85 (future paid surfaces)
+ *
+ * @param limit  Maximum signals to return (default governed by mode config).
+ * @param mode   Signal quality mode (default: 'standard').
  */
-export async function getSignals(limit = 50): Promise<Signal[]> {
-  const safeLimit = Math.min(Math.max(1, limit), 200);
+export async function getSignals(
+  limit = 50,
+  mode: SignalMode = DEFAULT_SIGNAL_MODE,
+): Promise<Signal[]> {
+  const config = getModeConfig(mode);
+  const safeLimit = Math.min(Math.max(1, limit), config.defaultLimit);
 
   const hasContextTable = await tableExists('signal_contexts');
+
+  // ── Raw mode: permissive — show all non-rejected signals ──────────────────
+  // Mirrors the pre-mode query behaviour for full backward compatibility.
+  if (mode === 'raw') {
+    if (hasContextTable) {
+      const rows = await dbQuery<SignalRow>`
+        SELECT
+          s.id,
+          s.title,
+          s.summary,
+          s.description,
+          s.category,
+          s.signal_type,
+          s.entity_id,
+          s.entity_name,
+          s.confidence,
+          s.confidence_score,
+          s.date,
+          s.created_at,
+          sc.id                     AS ctx_id,
+          sc.summary                AS ctx_summary,
+          sc.why_it_matters         AS ctx_why_it_matters,
+          sc.affected_entities      AS ctx_affected_entities,
+          sc.implications           AS ctx_implications,
+          sc.confidence_explanation AS ctx_confidence_explanation,
+          sc.source_basis           AS ctx_source_basis,
+          sc.model_provider         AS ctx_model_provider,
+          sc.model_name             AS ctx_model_name,
+          sc.prompt_version         AS ctx_prompt_version,
+          sc.status                 AS ctx_status,
+          sc.generation_error       AS ctx_generation_error,
+          sc.created_at             AS ctx_created_at,
+          sc.updated_at             AS ctx_updated_at
+        FROM signals s
+        LEFT JOIN signal_contexts sc
+          ON sc.signal_id = s.id AND sc.status = 'ready'
+        WHERE s.status IS NULL OR s.status NOT IN ('rejected')
+        ORDER BY s.created_at DESC
+        LIMIT ${safeLimit}
+      `;
+      return rows.map(rowToSignal);
+    }
+
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        id,
+        title,
+        summary,
+        description,
+        category,
+        signal_type,
+        entity_id,
+        entity_name,
+        confidence,
+        confidence_score,
+        date,
+        created_at
+      FROM signals
+      WHERE status IS NULL OR status NOT IN ('rejected')
+      ORDER BY created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  }
+
+  // ── Standard / Premium mode: filtered by status and confidence ────────────
+  // Convert the 0-100 integer threshold to the 0-1 NUMERIC scale used by
+  // confidence_score.  Rows without a confidence_score are included (legacy).
+  const minCs = config.minConfidence / 100;
 
   if (hasContextTable) {
     // Single query: signals LEFT JOIN signal_contexts (status='ready').
@@ -295,7 +375,8 @@ export async function getSignals(limit = 50): Promise<Signal[]> {
       FROM signals s
       LEFT JOIN signal_contexts sc
         ON sc.signal_id = s.id AND sc.status = 'ready'
-      WHERE s.status IS NULL OR s.status NOT IN ('rejected')
+      WHERE (s.status IS NULL OR s.status IN ('auto', 'published'))
+        AND (s.confidence_score IS NULL OR s.confidence_score >= ${minCs})
       ORDER BY s.created_at DESC
       LIMIT ${safeLimit}
     `;
@@ -318,7 +399,8 @@ export async function getSignals(limit = 50): Promise<Signal[]> {
       date,
       created_at
     FROM signals
-    WHERE status IS NULL OR status NOT IN ('rejected')
+    WHERE (status IS NULL OR status IN ('auto', 'published'))
+      AND (confidence_score IS NULL OR confidence_score >= ${minCs})
     ORDER BY created_at DESC
     LIMIT ${safeLimit}
   `;

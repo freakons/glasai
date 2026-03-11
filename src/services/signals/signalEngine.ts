@@ -18,6 +18,7 @@
  */
 
 import type { Event, Signal, SignalType, SignalDirection } from '@/types/intelligence';
+import { type SignalMode, getModeConfig, DEFAULT_SIGNAL_MODE } from '@/lib/signals/signalModes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detection rule configuration
@@ -239,30 +240,47 @@ function buildRecommendation(type: SignalType): string {
  * deterministic — re-running with the same events produces the same IDs,
  * enabling idempotent upserts downstream.
  *
+ * The optional `mode` parameter adjusts the detection sensitivity via each
+ * rule's engineMinCountMultiplier from the SignalModeConfig:
+ *   raw      — multiplier 0.5 → lower cluster thresholds → more signals
+ *   standard — multiplier 1.0 → default thresholds (unchanged behaviour)
+ *   premium  — multiplier 1.0 → same generation as standard; stricter
+ *              filtering is applied on the read path, not here
+ *
  * @param events  Array of intelligence events (any recency).
+ * @param mode    Signal quality mode for generation sensitivity (default: 'standard').
  * @returns       Array of generated Signals, ready for persistence.
  */
-export function generateSignalsFromEvents(events: Event[]): Signal[] {
+export function generateSignalsFromEvents(
+  events: Event[],
+  mode: SignalMode = DEFAULT_SIGNAL_MODE,
+): Signal[] {
   if (events.length === 0) return [];
+
+  const modeConfig = getModeConfig(mode);
+  const multiplier = modeConfig.engineMinCountMultiplier;
 
   const signals: Signal[] = [];
   const now = new Date().toISOString();
 
   for (const rule of DETECTION_RULES) {
+    // Apply mode-specific minCount: clamp to minimum of 1.
+    const effectiveMinCount = Math.max(1, Math.floor(rule.minCount * multiplier));
+
     // Filter events matching this rule's event types
     const matching = events.filter((e) =>
       (rule.eventTypes as string[]).includes(e.type),
     );
 
-    if (matching.length < rule.minCount) continue;
+    if (matching.length < effectiveMinCount) continue;
 
     // Find non-overlapping clusters within the time window
-    const clusters = findClusters(matching, rule.windowMs, rule.minCount);
+    const clusters = findClusters(matching, rule.windowMs, effectiveMinCount);
     const windowDays = Math.round(rule.windowMs / (24 * 60 * 60 * 1000));
 
     for (const cluster of clusters) {
       const eventIds = cluster.map((e) => e.id);
-      const confidence = computeConfidence(cluster.length, rule.minCount);
+      const confidence = computeConfidence(cluster.length, effectiveMinCount);
       const affectedEntities = [...new Set(cluster.map((e) => e.company))];
 
       const signal: Signal = {
@@ -283,6 +301,6 @@ export function generateSignalsFromEvents(events: Event[]): Signal[] {
     }
   }
 
-  console.log(`[signalEngine] Generated ${signals.length} signal(s) from ${events.length} event(s).`);
+  console.log(`[signalEngine] mode=${mode} multiplier=${multiplier} generated=${signals.length} from ${events.length} events`);
   return signals;
 }
