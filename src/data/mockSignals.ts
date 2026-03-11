@@ -4,6 +4,10 @@
  * regulatory moves, breakthrough research, etc.
  */
 
+import type { SignalContext } from '@/types/intelligence';
+
+export type { SignalContext };
+
 export type SignalCategory =
   | 'models'
   | 'funding'
@@ -26,6 +30,11 @@ export interface Signal {
   confidence: number;
   /** Optional related signal IDs */
   relatedIds?: string[];
+  /**
+   * Precomputed intelligence context (status='ready').
+   * Present only when a context row has been generated; undefined otherwise.
+   */
+  context?: SignalContext | null;
 }
 
 export const MOCK_SIGNALS: Signal[] = [

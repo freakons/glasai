@@ -51,6 +51,25 @@ interface SignalRow {
   /** ISO date string, added by migration */
   date: string | null;
   created_at: string;
+
+  // ── Context columns — present only when queried with LEFT JOIN on signal_contexts ──
+  /** Primary key of the joined context row; null when no ready context exists. */
+  ctx_id?: string | null;
+  ctx_summary?: string | null;
+  ctx_why_it_matters?: string | null;
+  /** JSONB array parsed to JS value by the DB driver */
+  ctx_affected_entities?: SignalContextEntity[] | null;
+  /** TEXT[] column */
+  ctx_implications?: string[] | null;
+  ctx_confidence_explanation?: string | null;
+  ctx_source_basis?: string | null;
+  ctx_model_provider?: string | null;
+  ctx_model_name?: string | null;
+  ctx_prompt_version?: string | null;
+  ctx_status?: string | null;
+  ctx_generation_error?: string | null;
+  ctx_created_at?: string | null;
+  ctx_updated_at?: string | null;
 }
 
 interface EventRow {
@@ -108,6 +127,31 @@ function rowToSignal(row: SignalRow): Signal {
         ? Math.round(parseFloat(row.confidence_score) * 100)
         : 80;
 
+  // Build context from LEFT JOIN columns when a ready context row was joined.
+  // ctx_id is non-null only when the JOIN matched a signal_contexts row with
+  // status='ready', so this branch is safe to treat as a complete context.
+  let context: SignalContext | undefined;
+  if (row.ctx_id != null) {
+    context = {
+      id:                    row.ctx_id,
+      signalId:              row.id,
+      summary:               row.ctx_summary ?? null,
+      whyItMatters:          row.ctx_why_it_matters ?? null,
+      affectedEntities:      row.ctx_affected_entities ?? [],
+      implications:          row.ctx_implications ?? [],
+      confidenceExplanation: row.ctx_confidence_explanation ?? null,
+      sourceBasis:           row.ctx_source_basis ?? null,
+      modelProvider:         row.ctx_model_provider ?? '',
+      modelName:             row.ctx_model_name ?? '',
+      promptVersion:         row.ctx_prompt_version ?? '',
+      // The LEFT JOIN condition enforces status='ready', so this is always 'ready'.
+      status:                'ready' as const,
+      generationError:       row.ctx_generation_error ?? null,
+      createdAt:             row.ctx_created_at ?? row.created_at,
+      updatedAt:             row.ctx_updated_at ?? undefined,
+    };
+  }
+
   return {
     id:         row.id,
     title:      row.title,
@@ -117,6 +161,7 @@ function rowToSignal(row: SignalRow): Signal {
     summary:    row.summary ?? row.description,
     date:       row.date ?? row.created_at,
     confidence,
+    ...(context !== undefined ? { context } : {}),
   };
 }
 
@@ -200,17 +245,64 @@ function engineTypeToCategory(type: string | null): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fetch intelligence signals from the database.
+ * Fetch intelligence signals from the database, optionally including
+ * precomputed context via a single LEFT JOIN on signal_contexts.
  *
- * Reads from the `signals` table which is populated by the intelligence
- * engine pipeline (/api/signals).  Returns an empty array when the DB is
- * unavailable or the table is empty.
+ * When the signal_contexts table exists (migration 006), context with
+ * status='ready' is joined in the same query — one round-trip, no N+1.
+ * When the table is absent the function falls back to a plain signals query
+ * so callers remain unaffected during incremental migration.
  *
  * @param limit  Maximum signals to return (default 50).
  */
 export async function getSignals(limit = 50): Promise<Signal[]> {
   const safeLimit = Math.min(Math.max(1, limit), 200);
 
+  const hasContextTable = await tableExists('signal_contexts');
+
+  if (hasContextTable) {
+    // Single query: signals LEFT JOIN signal_contexts (status='ready').
+    // Avoids N+1 — one round-trip regardless of result set size.
+    // Context columns are aliased with ctx_ prefix to avoid name collisions.
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        s.id,
+        s.title,
+        s.summary,
+        s.description,
+        s.category,
+        s.signal_type,
+        s.entity_id,
+        s.entity_name,
+        s.confidence,
+        s.confidence_score,
+        s.date,
+        s.created_at,
+        sc.id                     AS ctx_id,
+        sc.summary                AS ctx_summary,
+        sc.why_it_matters         AS ctx_why_it_matters,
+        sc.affected_entities      AS ctx_affected_entities,
+        sc.implications           AS ctx_implications,
+        sc.confidence_explanation AS ctx_confidence_explanation,
+        sc.source_basis           AS ctx_source_basis,
+        sc.model_provider         AS ctx_model_provider,
+        sc.model_name             AS ctx_model_name,
+        sc.prompt_version         AS ctx_prompt_version,
+        sc.status                 AS ctx_status,
+        sc.generation_error       AS ctx_generation_error,
+        sc.created_at             AS ctx_created_at,
+        sc.updated_at             AS ctx_updated_at
+      FROM signals s
+      LEFT JOIN signal_contexts sc
+        ON sc.signal_id = s.id AND sc.status = 'ready'
+      WHERE s.status IS NULL OR s.status NOT IN ('rejected')
+      ORDER BY s.created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  }
+
+  // Fallback: signal_contexts table not yet applied (pre-migration 006).
   const rows = await dbQuery<SignalRow>`
     SELECT
       id,
