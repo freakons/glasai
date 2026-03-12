@@ -97,6 +97,19 @@ Cache keys:
 
 **Free tier:** 0.5GB storage, 1 compute unit — sufficient for MVP.
 
+### Branch Policy (Permanent)
+
+Omterminal uses exactly **two** Neon branches:
+
+| Branch | Purpose |
+|---|---|
+| `production` | Live data — used by Vercel Production environment |
+| `vercel-dev` | Dev/staging data — used by Vercel Preview and Development environments |
+
+Automatic per-preview Neon branch creation is **disabled**. All preview deployments share the `vercel-dev` branch via the `DATABASE_URL` set in Vercel's Preview environment scope. No per-PR database isolation is needed for this solo-founder project.
+
+The app reads only `DATABASE_URL`. It does not create or select Neon branches at runtime.
+
 ### Schema
 
 ```sql

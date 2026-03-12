@@ -67,3 +67,25 @@ DIGEST_FROM=OM Terminal <digest@omterminal.com>
 
 Push to `main` → Vercel auto-deploys via GitHub.
 Dev work on `claude/` prefixed branches → merge via PR.
+
+---
+
+## Database — Neon Branch Policy
+
+Omterminal uses exactly **two** Neon branches, permanently:
+
+| Neon Branch | Used By |
+|---|---|
+| `production` | Vercel Production (main → omterminal.com) |
+| `vercel-dev` | Vercel Preview + Development (all other deploys) |
+
+**Automatic per-preview Neon branch creation is disabled.**
+Preview deploys share the `vercel-dev` branch. No per-PR database isolation is needed for this solo project.
+
+`DATABASE_URL` in Vercel is set per environment scope:
+- Production → Neon `production` connection string
+- Preview → Neon `vercel-dev` connection string
+- Development → Neon `vercel-dev` connection string
+
+See [`docs/workflow.md`](docs/workflow.md) for the full workflow guide.
+See [`docs/operator-checklist.md`](docs/operator-checklist.md) for the one-time dashboard setup steps.
