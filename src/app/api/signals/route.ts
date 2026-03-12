@@ -28,6 +28,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { getCache, setCache } from '@/lib/memoryCache';
 import { getEdgeSignals, setEdgeSignals } from '@/lib/edgeCache';
 import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
@@ -178,20 +179,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, signals, count: signals.length });
   }
 
-  // ── Engine mode: run signals generation ───────────────────────────────────
+  // ── Engine mode: run signals generation (lock-protected) ─────────────────
   // Parse mode for the engine run; defaults to standard to preserve existing behaviour.
   const engineMode = parseSignalMode(new URL(req.url).searchParams.get('mode'));
 
   try {
-    // 1. Fetch recent events (look back over 30 days to catch all windows)
-    const events = await getRecentEvents(500);
+    const guard = await withPipelineLock('signals-engine', reqId, 'signals', async () => {
+      const events = await getRecentEvents(500);
+      const signals = generateSignalsFromEvents(events, engineMode);
+      const inserted = await saveSignals(signals);
+      return { events, signals, inserted };
+    });
 
-    // 2. Run signals engine with mode-aware generation thresholds
-    const signals = generateSignalsFromEvents(events, engineMode);
+    if (guard.locked) {
+      return pipelineLockedResponse(reqId, guard);
+    }
 
-    // 3. Persist new signals (idempotent via ON CONFLICT DO NOTHING)
-    const inserted = await saveSignals(signals);
-
+    const { events, signals, inserted } = guard.result;
     logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
 
     return NextResponse.json({

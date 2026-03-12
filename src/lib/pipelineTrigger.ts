@@ -20,6 +20,7 @@
  */
 
 import { enqueue } from '@/lib/queue';
+import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipeline/lock';
 
 // Heavy service modules are imported dynamically inside runPipeline() so they
 // are excluded from the bundle of any route that imports this module at the
@@ -76,14 +77,24 @@ export function triggerPipelineOnce(): void {
 
 export async function runPipelineSafe(): Promise<void> {
   if (pipelineRunning) {
-    console.log('[pipeline] already running, skipping');
+    console.log('[pipeline] already running in this instance, skipping');
     return;
   }
+
+  // Acquire the distributed lock to prevent overlap across serverless instances
+  const lockResult = await acquirePipelineLock('self-heal');
+  if (!lockResult.acquired) {
+    console.log(`[pipeline] self-heal skipped — distributed lock held (${lockResult.reason})`);
+    return;
+  }
+
   pipelineRunning = true;
   try {
     await runPipeline();
   } finally {
     pipelineRunning = false;
+    await releasePipelineLock(lockResult.lockId);
+    console.log('[pipeline] self-heal lock released');
   }
 }
 

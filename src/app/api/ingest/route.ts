@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { ingestGNews } from '@/services/ingestion/gnewsFetcher';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { dbQuery } from '@/db/client';
 
 export const maxDuration = 10; // Vercel Hobby plan limit
@@ -54,24 +55,34 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
+  // ── Concurrency lock ──────────────────────────────────────────────────────
   try {
-    const result = await ingestGNews();
+    const guard = await withPipelineLock('ingest', reqId, 'ingest', async () => {
+      const result = await ingestGNews();
 
-    // Post-ingest diagnostics (authenticated path only — never exposed publicly)
-    let diagnostics: Record<string, unknown> = {};
-    try {
-      const eventsCount = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`;
-      const latestEvent = await dbQuery<{ id: string; type: string; title: string; company: string; timestamp: string }>`
-        SELECT id, type, title, company, timestamp FROM events ORDER BY timestamp DESC LIMIT 1
-      `;
-      diagnostics = {
-        eventsTableCount: parseInt(eventsCount[0]?.count ?? '0', 10),
-        latestEvent: latestEvent[0] ?? null,
-      };
-    } catch {
-      diagnostics = { error: 'diagnostics query failed' };
+      // Post-ingest diagnostics (authenticated path only — never exposed publicly)
+      let diagnostics: Record<string, unknown> = {};
+      try {
+        const eventsCount = await dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`;
+        const latestEvent = await dbQuery<{ id: string; type: string; title: string; company: string; timestamp: string }>`
+          SELECT id, type, title, company, timestamp FROM events ORDER BY timestamp DESC LIMIT 1
+        `;
+        diagnostics = {
+          eventsTableCount: parseInt(eventsCount[0]?.count ?? '0', 10),
+          latestEvent: latestEvent[0] ?? null,
+        };
+      } catch {
+        diagnostics = { error: 'diagnostics query failed' };
+      }
+
+      return { result, diagnostics };
+    });
+
+    if (guard.locked) {
+      return pipelineLockedResponse(reqId, guard);
     }
 
+    const { result, diagnostics } = guard.result;
     logWithRequestId(reqId, 'ingest', `total=${result.total} ingested=${result.ingested} skipped=${result.skipped} ms=${Date.now() - t0}`);
     return NextResponse.json({
       ok: true,
@@ -83,7 +94,7 @@ export async function GET(req: NextRequest) {
     console.error('[ingest] route error:', err);
     return NextResponse.json(
       { error: String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

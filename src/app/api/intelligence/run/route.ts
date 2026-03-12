@@ -18,6 +18,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment, checkLLMProvider } from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { runHarvester } from '@/harvester/runner';
 import { runTrendAnalysis } from '@/trends/runner';
 import { runInsightGeneration } from '@/insights/runner';
@@ -101,110 +102,120 @@ export async function POST(req: NextRequest) {
 
   logWithRequestId(reqId, 'intelligence/run', 'pipeline started');
 
-  const stages: StageResult[] = [];
-  let anyError = false;
+  // ── Concurrency lock ──────────────────────────────────────────────────────
+  const guard = await withPipelineLock('intelligence', reqId, 'intelligence/run', async () => {
+    const stages: StageResult[] = [];
+    let anyError = false;
 
-  // ── Stage 1: Harvester ────────────────────────────────────────────────────
-  const t1 = Date.now();
-  console.log('pipeline stage: harvester started');
-  try {
-    await runHarvester();
-    const d = Date.now() - t1;
-    stages.push({ stage: 'harvester', status: 'ok', durationMs: d });
-    logWithRequestId(reqId, 'intelligence/run', `stage=harvester status=ok ms=${d}`);
-    console.log('pipeline stage: harvester completed');
-  } catch (err) {
-    const d = Date.now() - t1;
-    const msg = String(err);
-    stages.push({ stage: 'harvester', status: 'error', durationMs: d, error: msg });
-    console.error(`pipeline stage: harvester failed reqId=${reqId}:`, err);
-    anyError = true;
-  }
+    // ── Stage 1: Harvester ──────────────────────────────────────────────────
+    const t1 = Date.now();
+    console.log('pipeline stage: harvester started');
+    try {
+      await runHarvester();
+      const d = Date.now() - t1;
+      stages.push({ stage: 'harvester', status: 'ok', durationMs: d });
+      logWithRequestId(reqId, 'intelligence/run', `stage=harvester status=ok ms=${d}`);
+      console.log('pipeline stage: harvester completed');
+    } catch (err) {
+      const d = Date.now() - t1;
+      const msg = String(err);
+      stages.push({ stage: 'harvester', status: 'error', durationMs: d, error: msg });
+      console.error(`pipeline stage: harvester failed reqId=${reqId}:`, err);
+      anyError = true;
+    }
 
-  // ── Stage 2: Trend Analysis ───────────────────────────────────────────────
-  const t2 = Date.now();
-  console.log('pipeline stage: trend analysis started');
-  try {
-    await runTrendAnalysis();
-    const d = Date.now() - t2;
-    stages.push({ stage: 'trends', status: 'ok', durationMs: d });
-    logWithRequestId(reqId, 'intelligence/run', `stage=trends status=ok ms=${d}`);
-    console.log('pipeline stage: trend analysis completed');
-  } catch (err) {
-    const d = Date.now() - t2;
-    const msg = String(err);
-    stages.push({ stage: 'trends', status: 'error', durationMs: d, error: msg });
-    console.error(`pipeline stage: trend analysis failed reqId=${reqId}:`, err);
-    anyError = true;
-  }
+    // ── Stage 2: Trend Analysis ─────────────────────────────────────────────
+    const t2 = Date.now();
+    console.log('pipeline stage: trend analysis started');
+    try {
+      await runTrendAnalysis();
+      const d = Date.now() - t2;
+      stages.push({ stage: 'trends', status: 'ok', durationMs: d });
+      logWithRequestId(reqId, 'intelligence/run', `stage=trends status=ok ms=${d}`);
+      console.log('pipeline stage: trend analysis completed');
+    } catch (err) {
+      const d = Date.now() - t2;
+      const msg = String(err);
+      stages.push({ stage: 'trends', status: 'error', durationMs: d, error: msg });
+      console.error(`pipeline stage: trend analysis failed reqId=${reqId}:`, err);
+      anyError = true;
+    }
 
-  // ── Stage 3: Insight Generation ───────────────────────────────────────────
-  const t3 = Date.now();
-  console.log('pipeline stage: insight generation started');
-  try {
-    await runInsightGeneration();
-    const d = Date.now() - t3;
-    stages.push({ stage: 'insights', status: 'ok', durationMs: d });
-    logWithRequestId(reqId, 'intelligence/run', `stage=insights status=ok ms=${d}`);
-    console.log('pipeline stage: insight generation completed');
-  } catch (err) {
-    const d = Date.now() - t3;
-    const msg = String(err);
-    stages.push({ stage: 'insights', status: 'error', durationMs: d, error: msg });
-    console.error(`pipeline stage: insight generation failed reqId=${reqId}:`, err);
-    anyError = true;
-  }
+    // ── Stage 3: Insight Generation ─────────────────────────────────────────
+    const t3 = Date.now();
+    console.log('pipeline stage: insight generation started');
+    try {
+      await runInsightGeneration();
+      const d = Date.now() - t3;
+      stages.push({ stage: 'insights', status: 'ok', durationMs: d });
+      logWithRequestId(reqId, 'intelligence/run', `stage=insights status=ok ms=${d}`);
+      console.log('pipeline stage: insight generation completed');
+    } catch (err) {
+      const d = Date.now() - t3;
+      const msg = String(err);
+      stages.push({ stage: 'insights', status: 'error', durationMs: d, error: msg });
+      console.error(`pipeline stage: insight generation failed reqId=${reqId}:`, err);
+      anyError = true;
+    }
 
-  // ── Finalise ──────────────────────────────────────────────────────────────
-  const totalMs    = Date.now() - t0;
-  const overallStatus = anyError ? 'partial' : 'ok';
+    // ── Finalise ────────────────────────────────────────────────────────────
+    const totalMs = Date.now() - t0;
+    const overallStatus = anyError ? 'partial' : 'ok';
 
-  logWithRequestId(
-    reqId,
-    'intelligence/run',
-    `pipeline complete status=${overallStatus} ms=${totalMs}`,
-  );
+    logWithRequestId(
+      reqId,
+      'intelligence/run',
+      `pipeline complete status=${overallStatus} ms=${totalMs}`,
+    );
 
-  // Persist run record to DB for health monitoring
-  await logPipelineRun('full', overallStatus, totalMs, {
-    error_msg: anyError ? stages.filter((s) => s.error).map((s) => s.stage).join(',') : undefined,
+    await logPipelineRun('full', overallStatus, totalMs, {
+      error_msg: anyError ? stages.filter((s) => s.error).map((s) => s.stage).join(',') : undefined,
+    });
+
+    // ── Post-run diagnostics ────────────────────────────────────────────────
+    let pipelineDiagnostics: Record<string, unknown> = {};
+
+    try {
+      const [signalCount, trendCount, insightCount, eventCount] = await Promise.all([
+        dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`,
+        dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM trends`,
+        dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM insights`,
+        dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`,
+      ]);
+      const latestSignal = await dbQuery<Record<string, unknown>>`
+        SELECT id, title, status, category, confidence, trust_score, created_at
+        FROM signals ORDER BY created_at DESC LIMIT 1
+      `;
+      const latestTrend = await dbQuery<Record<string, unknown>>`
+        SELECT topic, category, signal_count, confidence, created_at
+        FROM trends ORDER BY created_at DESC LIMIT 1
+      `;
+      const latestInsight = await dbQuery<Record<string, unknown>>`
+        SELECT title, category, confidence, created_at
+        FROM insights ORDER BY created_at DESC LIMIT 1
+      `;
+      pipelineDiagnostics = {
+        totalEvents:   parseInt(eventCount[0]?.count ?? '0', 10),
+        totalSignals:  parseInt(signalCount[0]?.count ?? '0', 10),
+        totalTrends:   parseInt(trendCount[0]?.count ?? '0', 10),
+        totalInsights: parseInt(insightCount[0]?.count ?? '0', 10),
+        latestSignal:  latestSignal[0] ?? null,
+        latestTrend:   latestTrend[0] ?? null,
+        latestInsight: latestInsight[0] ?? null,
+      };
+      console.log(`[intelligence/run] post-run diagnostics: events=${pipelineDiagnostics.totalEvents} signals=${pipelineDiagnostics.totalSignals} trends=${pipelineDiagnostics.totalTrends} insights=${pipelineDiagnostics.totalInsights}`);
+    } catch (err) {
+      console.warn('[intelligence/run] diagnostics query failed:', err);
+    }
+
+    return { stages, anyError, totalMs, overallStatus, pipelineDiagnostics };
   });
 
-  // ── Post-run diagnostics ──────────────────────────────────────────────────
-  let pipelineDiagnostics: Record<string, unknown> = {};
-
-  try {
-    const [signalCount, trendCount, insightCount, eventCount] = await Promise.all([
-      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM signals`,
-      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM trends`,
-      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM insights`,
-      dbQuery<{ count: string }>`SELECT COUNT(*) AS count FROM events`,
-    ]);
-    const latestSignal = await dbQuery<Record<string, unknown>>`
-      SELECT id, title, status, category, confidence, trust_score, created_at
-      FROM signals ORDER BY created_at DESC LIMIT 1
-    `;
-    const latestTrend = await dbQuery<Record<string, unknown>>`
-      SELECT topic, category, signal_count, confidence, created_at
-      FROM trends ORDER BY created_at DESC LIMIT 1
-    `;
-    const latestInsight = await dbQuery<Record<string, unknown>>`
-      SELECT title, category, confidence, created_at
-      FROM insights ORDER BY created_at DESC LIMIT 1
-    `;
-    pipelineDiagnostics = {
-      totalEvents:   parseInt(eventCount[0]?.count ?? '0', 10),
-      totalSignals:  parseInt(signalCount[0]?.count ?? '0', 10),
-      totalTrends:   parseInt(trendCount[0]?.count ?? '0', 10),
-      totalInsights: parseInt(insightCount[0]?.count ?? '0', 10),
-      latestSignal:  latestSignal[0] ?? null,
-      latestTrend:   latestTrend[0] ?? null,
-      latestInsight: latestInsight[0] ?? null,
-    };
-    console.log(`[intelligence/run] post-run diagnostics: events=${pipelineDiagnostics.totalEvents} signals=${pipelineDiagnostics.totalSignals} trends=${pipelineDiagnostics.totalTrends} insights=${pipelineDiagnostics.totalInsights}`);
-  } catch (err) {
-    console.warn('[intelligence/run] diagnostics query failed:', err);
+  if (guard.locked) {
+    return pipelineLockedResponse(reqId, guard);
   }
+
+  const { stages, anyError, totalMs, overallStatus, pipelineDiagnostics } = guard.result;
 
   return NextResponse.json({
     ok:      !anyError,
@@ -214,7 +225,6 @@ export async function POST(req: NextRequest) {
     timestamp: new Date().toISOString(),
     diagnostics: pipelineDiagnostics,
   }, {
-    // Return 207 Multi-Status when some stages failed but others succeeded
     status: anyError ? 207 : 200,
   });
 }
