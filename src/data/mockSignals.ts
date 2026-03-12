@@ -35,6 +35,16 @@ export interface Signal {
    * Present only when a context row has been generated; undefined otherwise.
    */
   context?: SignalContext | null;
+  /**
+   * Composite significance score (0–100) computed at write time.
+   * Null for signals written before migration 008.
+   */
+  significanceScore?: number | null;
+  /**
+   * Number of distinct sources corroborating this signal.
+   * Null for signals written before migration 008.
+   */
+  sourceSupportCount?: number | null;
 }
 
 export const MOCK_SIGNALS: Signal[] = [

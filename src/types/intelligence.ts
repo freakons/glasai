@@ -376,6 +376,17 @@ export interface Signal {
   recommendation?: string;
   /** Whether this signal has been reviewed by a human analyst */
   humanVerified?: boolean;
+  /**
+   * Composite significance score (0–100) computed at write time.
+   * Combines confidence, source diversity, velocity, type weight, and entity
+   * spread.  Null for signals written before migration 008.
+   */
+  significanceScore?: number | null;
+  /**
+   * Number of distinct sources that contributed events supporting this signal.
+   * Persisted alongside significanceScore; null for pre-migration rows.
+   */
+  sourceSupportCount?: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

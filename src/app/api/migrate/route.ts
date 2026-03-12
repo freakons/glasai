@@ -355,6 +355,24 @@ const STATEMENTS = [
      ON signal_contexts (status, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_signal_contexts_signal_id_status
      ON signal_contexts (signal_id, status)`,
+
+  // ── Migration 008: Signal Significance Foundation ─────────────────────────
+  // Adds significance_score (0–100) and source_support_count to signals.
+  // Both columns are nullable for backward compatibility with existing rows.
+  // significance_score is a composite metric computed at write time:
+  //   confidence × weight + source diversity + velocity + type weight + entity spread
+  // source_support_count tracks how many distinct sources corroborate the signal.
+  `ALTER TABLE signals
+     ADD COLUMN IF NOT EXISTS significance_score INTEGER
+       CHECK (significance_score >= 0 AND significance_score <= 100)`,
+  `ALTER TABLE signals
+     ADD COLUMN IF NOT EXISTS source_support_count INTEGER`,
+  // Index for significance-ordered reads (NULLS LAST keeps legacy rows below scored ones).
+  `CREATE INDEX IF NOT EXISTS idx_signals_significance
+     ON signals (significance_score DESC NULLS LAST)`,
+  // Composite index for significance + recency tie-breaking.
+  `CREATE INDEX IF NOT EXISTS idx_signals_significance_created_at
+     ON signals (significance_score DESC NULLS LAST, created_at DESC)`,
 ];
 
 /**
@@ -407,6 +425,10 @@ const TABLES_CREATED = [
   'signal_contexts',
   // migration 007
   'signal_contexts — composite indexes (status+created_at, signal_id+status)',
+  // migration 008
+  'signals.significance_score (column)',
+  'signals.source_support_count (column)',
+  'signals — significance indexes (significance_score, significance_score+created_at)',
 ];
 
 export async function POST(req: NextRequest) {
