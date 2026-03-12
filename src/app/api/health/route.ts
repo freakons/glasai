@@ -22,7 +22,8 @@ export const runtime = 'nodejs';
  */
 
 import { NextRequest, NextResponse }            from 'next/server';
-import { dbQuery, tableExists }                 from '@/db/client';
+import { dbQuery, tableExists, withDbContext, getDbQueryTimeoutMs } from '@/db/client';
+import { TimeoutError }                         from '@/lib/withTimeout';
 import { pingRedis, isRedisConfigured }         from '@/lib/cache/redis';
 import { getPipelineLockStatus }                from '@/lib/pipeline/lock';
 import { getProvider, getActiveProviderName }   from '@/lib/ai';
@@ -64,15 +65,19 @@ function isAdminAuthenticated(req: NextRequest): boolean {
 
 export async function GET(req: NextRequest) {
   const now = Date.now();
+  const reqId = req.headers.get('x-request-id') ?? undefined;
 
   // ── 1. Database connectivity (needed for public status too) ───────────────
   let dbConnected = false;
   let dbError: string | undefined;
+  let dbTimedOut = false;
   try {
-    const rows = await dbQuery<{ now: string }>`SELECT NOW() AS now`;
+    const db = withDbContext({ operation: 'health:ping', requestId: reqId });
+    const rows = await db.queryStrict<{ now: string }>`SELECT NOW() AS now`;
     dbConnected = rows.length > 0;
     if (!dbConnected) dbError = 'SELECT NOW() returned no rows';
   } catch (err) {
+    dbTimedOut = err instanceof TimeoutError;
     dbError = err instanceof Error ? err.message : String(err);
   }
 
@@ -83,7 +88,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok:        dbConnected,
-        status:    dbConnected ? 'ok' : 'degraded',
+        status:    dbConnected ? 'ok' : (dbTimedOut ? 'timeout' : 'degraded'),
         timestamp: new Date().toISOString(),
       },
       {
@@ -145,8 +150,9 @@ export async function GET(req: NextRequest) {
   let isDataStale = false;
 
   if (dbConnected && criticalTableStatus['pipeline_runs']) {
+    const db = withDbContext({ operation: 'health:pipeline_runs', requestId: reqId });
     try {
-      const lastRows = await dbQuery<{
+      const lastRows = await db.query<{
         id: number; run_at: string; stage: string; status: string;
         ingested: number | null; signals_generated: number | null; duration_ms: number | null;
         trigger_type: string | null; correlation_id: string | null;
@@ -160,7 +166,7 @@ export async function GET(req: NextRequest) {
       if (lastRows.length > 0) lastRun = lastRows[0] as Record<string, unknown>;
     } catch {
       try {
-        const rows = await dbQuery<{
+        const rows = await db.query<{
           id: number; run_at: string; stage: string; status: string;
           ingested: number | null; signals_generated: number | null; duration_ms: number | null;
         }>`
@@ -174,7 +180,7 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const successRows = await dbQuery<{
+      const successRows = await db.query<{
         id: number; run_at: string; status: string; duration_ms: number | null;
       }>`
         SELECT id, run_at, status, duration_ms
@@ -212,8 +218,10 @@ export async function GET(req: NextRequest) {
     version:     '1.0.0',
 
     database: {
-      connected: dbConnected,
-      provider:  process.env.DB_PROVIDER ?? 'neon',
+      connected:        dbConnected,
+      provider:         process.env.DB_PROVIDER ?? 'neon',
+      queryTimeoutMs:   getDbQueryTimeoutMs(),
+      ...(dbTimedOut ? { timedOut: true } : {}),
       ...(dbError ? { error: dbError } : {}),
     },
 
