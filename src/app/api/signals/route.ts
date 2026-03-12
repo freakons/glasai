@@ -27,7 +27,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
-import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { getOrCreateRequestId, logWithRequestId } from '@/lib/requestId';
 import { getCache, setCache } from '@/lib/memoryCache';
 import { getEdgeSignals, setEdgeSignals } from '@/lib/edgeCache';
 import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
@@ -44,14 +44,14 @@ const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60
 
 export async function GET(req: NextRequest) {
   const t0 = Date.now();
-  const reqId = createRequestId();
+  const reqId = getOrCreateRequestId(req);
   try {
     validateEnvironment(['DATABASE_URL']);
   } catch (err) {
     console.error('[api/signals] environment validation failed:', err);
     return NextResponse.json(
-      { ok: false, source: 'error', error: 'signals query failed', signals: [], count: 0 },
-      { status: 503 },
+      { ok: false, source: 'error', error: 'signals query failed', signals: [], count: 0, requestId: reqId },
+      { status: 503, headers: { 'x-request-id': reqId } },
     );
   }
 
@@ -126,14 +126,14 @@ export async function GET(req: NextRequest) {
       }
 
       if (dbSignals.length > 0) {
-        const payload: Record<string, unknown> = { ok: true, source: 'db', mode, signals: dbSignals, count: dbSignals.length };
+        const payload: Record<string, unknown> = { ok: true, source: 'db', mode, signals: dbSignals, count: dbSignals.length, requestId: reqId };
         if (debug && diagnostics) payload.diagnostics = diagnostics;
         // Only populate edge cache for the default mode (avoids edge cache thrash across modes).
         if (mode === DEFAULT_SIGNAL_MODE) await setEdgeSignals(payload);
         await redisSet(redisCacheKey, payload, TTL.SIGNALS);
         setCache(memCacheKey, payload);
         logWithRequestId(reqId, 'signals', `cache_miss source=db mode=${mode} signals=${dbSignals.length} ms=${Date.now() - t0}`);
-        return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db' } });
+        return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': 'db', 'x-request-id': reqId } });
       }
 
       // DB is reachable but has no signals yet — return an explicit empty state.
@@ -146,9 +146,10 @@ export async function GET(req: NextRequest) {
           signals: [],
           count: 0,
           message: 'No signals ingested yet. Trigger /api/ingest to populate.',
+          requestId: reqId,
           ...(diagnostics ? { diagnostics } : {}),
         },
-        { headers: { ...CACHE_HEADERS, 'x-source': 'empty' } },
+        { headers: { ...CACHE_HEADERS, 'x-source': 'empty', 'x-request-id': reqId } },
       );
     } catch (err) {
       // Cache or DB query failed — surface the error clearly rather than hiding it with mock data.
@@ -160,22 +161,29 @@ export async function GET(req: NextRequest) {
           error: process.env.NODE_ENV === 'production' ? 'signals query failed' : String(err),
           signals: [],
           count: 0,
+          requestId: reqId,
         },
-        { status: 503, headers: { 'x-source': 'error' } },
+        { status: 503, headers: { 'x-source': 'error', 'x-request-id': reqId } },
       );
     }
   }
 
   // ── Auth check (engine / list modes) ─────────────────────────────────────
   if (expected && cronSecret !== expected && querySecret !== expected) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return NextResponse.json(
+      { error: 'Unauthorized', requestId: reqId },
+      { status: 401, headers: { 'x-request-id': reqId } },
+    );
   }
 
   // ── List-only mode: return stored signals without running the engine ───────
   if (listOnly) {
     const limit   = Math.min(parseInt(searchParams.get('limit') ?? '20', 10), 200);
     const signals = await getRecentSignals(limit);
-    return NextResponse.json({ ok: true, signals, count: signals.length });
+    return NextResponse.json(
+      { ok: true, signals, count: signals.length, requestId: reqId },
+      { headers: { 'x-request-id': reqId } },
+    );
   }
 
   // ── Engine mode: run signals generation ───────────────────────────────────
@@ -194,18 +202,25 @@ export async function GET(req: NextRequest) {
 
     logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
 
-    return NextResponse.json({
-      ok:               true,
-      mode:             engineMode,
-      eventsAnalysed:   events.length,
-      signalsGenerated: signals.length,
-      signalsInserted:  inserted,
-      signals,
-      timestamp: new Date().toISOString(),
-    });
+    return NextResponse.json(
+      {
+        ok:               true,
+        mode:             engineMode,
+        eventsAnalysed:   events.length,
+        signalsGenerated: signals.length,
+        signalsInserted:  inserted,
+        signals,
+        requestId:        reqId,
+        timestamp:        new Date().toISOString(),
+      },
+      { headers: { 'x-request-id': reqId } },
+    );
   } catch (err) {
     console.error('[api/signals] engine error:', err);
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(err), requestId: reqId },
+      { status: 500, headers: { 'x-request-id': reqId } },
+    );
   }
 }
 

@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { ingestGNews } from '@/services/ingestion/gnewsFetcher';
-import { createRequestId, logWithRequestId } from '@/lib/requestId';
+import { getOrCreateRequestId, logWithRequestId } from '@/lib/requestId';
 import { dbQuery } from '@/db/client';
 
 export const maxDuration = 10; // Vercel Hobby plan limit
@@ -47,11 +47,14 @@ function isAuthorized(req: NextRequest): boolean {
 
 export async function GET(req: NextRequest) {
   const t0    = Date.now();
-  const reqId = createRequestId();
+  const reqId = getOrCreateRequestId(req);
   validateEnvironment(['GNEWS_API_KEY']);
 
   if (!isAuthorized(req)) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return NextResponse.json(
+      { error: 'Unauthorized', requestId: reqId },
+      { status: 401, headers: { 'x-request-id': reqId } },
+    );
   }
 
   try {
@@ -73,17 +76,21 @@ export async function GET(req: NextRequest) {
     }
 
     logWithRequestId(reqId, 'ingest', `total=${result.total} ingested=${result.ingested} skipped=${result.skipped} ms=${Date.now() - t0}`);
-    return NextResponse.json({
-      ok: true,
-      ...result,
-      diagnostics,
-      timestamp: new Date().toISOString(),
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ...result,
+        diagnostics,
+        requestId: reqId,
+        timestamp: new Date().toISOString(),
+      },
+      { headers: { 'x-request-id': reqId } },
+    );
   } catch (err) {
     console.error('[ingest] route error:', err);
     return NextResponse.json(
-      { error: String(err) },
-      { status: 500 }
+      { error: String(err), requestId: reqId },
+      { status: 500, headers: { 'x-request-id': reqId } },
     );
   }
 }

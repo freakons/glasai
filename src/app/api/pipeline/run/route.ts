@@ -41,7 +41,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse }           from 'next/server';
 import { validateEnvironment }                  from '@/lib/env';
-import { createRequestId, logWithRequestId }    from '@/lib/requestId';
+import { getOrCreateRequestId, logWithRequestId } from '@/lib/requestId';
 import { ingestGNews }                          from '@/services/ingestion/gnewsFetcher';
 import { ingestRss }                            from '@/services/ingestion/rssIngester';
 import { getRecentEvents }                      from '@/services/storage/eventStore';
@@ -213,7 +213,7 @@ async function persistSkippedRun(
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
-  const correlationId = createRequestId();
+  const correlationId = getOrCreateRequestId(req);
   const url = new URL(req.url);
   const isDryRun = url.searchParams.get('dry_run') === 'true';
 
@@ -222,8 +222,8 @@ export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
     logWithRequestId(correlationId, 'pipeline/run', 'unauthorized');
     return NextResponse.json(
-      { ok: false, status: 'error', message: 'Unauthorized' },
-      { status: 401 },
+      { ok: false, status: 'error', message: 'Unauthorized', requestId: correlationId },
+      { status: 401, headers: { 'x-request-id': correlationId } },
     );
   }
 
@@ -232,17 +232,21 @@ export async function POST(req: NextRequest) {
 
   // ── Dry-run ───────────────────────────────────────────────────────────────
   if (isDryRun) {
-    return NextResponse.json({
-      ok:           true,
-      status:       'dry_run' as RunStatus,
-      runId:        correlationId,
-      triggerType,
-      dryRun:       true,
-      startedAt:    new Date(t0).toISOString(),
-      completedAt:  new Date().toISOString(),
-      durationMs:   Date.now() - t0,
-      message:      'Dry-run: auth and env validated. No pipeline execution performed.',
-    });
+    return NextResponse.json(
+      {
+        ok:           true,
+        status:       'dry_run' as RunStatus,
+        runId:        correlationId,
+        requestId:    correlationId,
+        triggerType,
+        dryRun:       true,
+        startedAt:    new Date(t0).toISOString(),
+        completedAt:  new Date().toISOString(),
+        durationMs:   Date.now() - t0,
+        message:      'Dry-run: auth and env validated. No pipeline execution performed.',
+      },
+      { headers: { 'x-request-id': correlationId } },
+    );
   }
 
   // ── Concurrency lock ──────────────────────────────────────────────────────
@@ -252,18 +256,22 @@ export async function POST(req: NextRequest) {
     logWithRequestId(correlationId, 'pipeline/run', `skipped — ${lockResult.reason}`);
     await persistSkippedRun(correlationId, triggerType, lockResult.reason);
 
-    return NextResponse.json({
-      ok:          false,
-      status:      'skipped_active_run' as RunStatus,
-      runId:       correlationId,
-      triggerType,
-      dryRun:      false,
-      startedAt:   new Date(t0).toISOString(),
-      completedAt: new Date().toISOString(),
-      durationMs:  Date.now() - t0,
-      message:     `Pipeline already active: ${lockResult.reason}`,
-      lockedBy:    lockResult.lockedBy,
-    }, { status: 409 });
+    return NextResponse.json(
+      {
+        ok:          false,
+        status:      'skipped_active_run' as RunStatus,
+        runId:       correlationId,
+        requestId:   correlationId,
+        triggerType,
+        dryRun:      false,
+        startedAt:   new Date(t0).toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs:  Date.now() - t0,
+        message:     `Pipeline already active: ${lockResult.reason}`,
+        lockedBy:    lockResult.lockedBy,
+      },
+      { status: 409, headers: { 'x-request-id': correlationId } },
+    );
   }
 
   // ── Execute pipeline ──────────────────────────────────────────────────────
@@ -445,24 +453,28 @@ export async function POST(req: NextRequest) {
     `status=${overallStatus} ingested=${articlesInserted} signals=${signalsGenerated} ms=${durationMs}`,
   );
 
-  return NextResponse.json({
-    ok:          overallStatus === 'completed',
-    status:      overallStatus,
-    runId:       correlationId,
-    triggerType,
-    dryRun:      false,
-    startedAt:   new Date(t0).toISOString(),
-    completedAt: new Date().toISOString(),
-    durationMs,
-    stages,
-    diagnostics: {
-      articlesFetched,
-      articlesInserted,
-      articlesDeduped,
-      signalsGenerated,
-      errorsCount,
+  return NextResponse.json(
+    {
+      ok:          overallStatus === 'completed',
+      status:      overallStatus,
+      runId:       correlationId,
+      requestId:   correlationId,
+      triggerType,
+      dryRun:      false,
+      startedAt:   new Date(t0).toISOString(),
+      completedAt: new Date().toISOString(),
+      durationMs,
+      stages,
+      diagnostics: {
+        articlesFetched,
+        articlesInserted,
+        articlesDeduped,
+        signalsGenerated,
+        errorsCount,
+      },
     },
-  }, { status: overallStatus === 'completed' ? 200 : 207 });
+    { status: overallStatus === 'completed' ? 200 : 207, headers: { 'x-request-id': correlationId } },
+  );
 }
 
 // Cron triggers can also use GET

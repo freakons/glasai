@@ -26,6 +26,7 @@ import { dbQuery, tableExists }                 from '@/db/client';
 import { pingRedis, isRedisConfigured }         from '@/lib/cache/redis';
 import { getPipelineLockStatus }                from '@/lib/pipeline/lock';
 import { getProvider, getActiveProviderName }   from '@/lib/ai';
+import { getOrCreateRequestId, logWithRequestId } from '@/lib/requestId';
 
 // Tables that must exist for the platform to function
 const CRITICAL_TABLES = [
@@ -64,6 +65,7 @@ function isAdminAuthenticated(req: NextRequest): boolean {
 
 export async function GET(req: NextRequest) {
   const now = Date.now();
+  const reqId = getOrCreateRequestId(req);
 
   // ── 1. Database connectivity (needed for public status too) ───────────────
   let dbConnected = false;
@@ -80,15 +82,17 @@ export async function GET(req: NextRequest) {
 
   // ── Public minimal response (unauthenticated) ─────────────────────────────
   if (!isAdmin) {
+    logWithRequestId(reqId, 'health', `public status=${dbConnected ? 'ok' : 'degraded'}`);
     return NextResponse.json(
       {
         ok:        dbConnected,
         status:    dbConnected ? 'ok' : 'degraded',
         timestamp: new Date().toISOString(),
+        requestId: reqId,
       },
       {
         status:  dbConnected ? 200 : 503,
-        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'x-request-id': reqId },
       },
     );
   }
@@ -203,10 +207,12 @@ export async function GET(req: NextRequest) {
   if (missingOptionalEnv.length > 0)  warnings.push(`Optional env vars not set: ${missingOptionalEnv.join(', ')}`);
   if (lockStatus.locked)              warnings.push(`Pipeline lock is held by: ${lockStatus.lockedBy}`);
 
+  logWithRequestId(reqId, 'health', `admin ready=${ready} db=${dbConnected}`);
   const health = {
     ok:      ready,
     status:  ready ? 'ok' : 'degraded',
     ready,
+    requestId:   reqId,
     timestamp:   new Date().toISOString(),
     environment: process.env.NODE_ENV ?? 'unknown',
     version:     '1.0.0',
@@ -261,6 +267,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(health, {
     status:  ready ? 200 : 503,
-    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'x-request-id': reqId },
   });
 }
