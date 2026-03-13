@@ -288,8 +288,8 @@ async function triggerHarvester(baseUrl, secret) {
       'User-Agent':   'Omterminal-Validator/1.0',
     };
     if (secret) {
-      headers['x-vercel-cron-secret'] = secret;
-      info('Using x-vercel-cron-secret header for auth');
+      headers['Authorization'] = `Bearer ${secret}`;
+      info('Using Authorization: Bearer header for auth');
     } else {
       info('No CRON_SECRET — relying on local dev open access');
     }
