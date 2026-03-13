@@ -40,12 +40,14 @@ interface SignalRow {
   confidence: number | null;
   confidence_score: string | null;
   intelligence_score: number | null;
+  significance_score: number | null;
   trust_score: number | null;
   created_at: string;
 }
 
 interface RelatedEntityRow {
   name: string;
+  type: string;
   mentions: string;
 }
 
@@ -55,6 +57,10 @@ interface CountRow {
 
 interface AvgRow {
   avg: string | null;
+}
+
+interface SourceCountRow {
+  distinct_sources: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,7 +88,7 @@ export async function GET(
     return NextResponse.json({ ok: false, error: 'Entity not found' }, { status: 404 });
   }
 
-  // 2. Fetch recent signals for this entity (last 20)
+  // 2. Fetch recent signals for this entity (last 20), including significance
   const recentSignals = await dbQuery<SignalRow>`
     SELECT
       s.id,
@@ -94,6 +100,7 @@ export async function GET(
       s.confidence,
       s.confidence_score,
       s.intelligence_score,
+      s.significance_score,
       s.trust_score,
       s.created_at
     FROM signals s
@@ -133,8 +140,19 @@ export async function GET(
     WHERE e.name = ${entityName}
   `;
 
+  // 3b. 30-day signal count
+  const [row30d] = await dbQuery<CountRow>`
+    SELECT COUNT(*) AS count
+    FROM signals s
+    JOIN signal_entities se ON se.signal_id = s.id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ${entityName}
+      AND s.created_at > NOW() - INTERVAL '30 days'
+  `;
+
   const count24h = parseInt(row24h?.count ?? '0', 10);
   const count7d  = parseInt(row7d?.count  ?? '0', 10);
+  const count30d = parseInt(row30d?.count ?? '0', 10);
 
   /** Velocity = weighted combination of 24 h and 7 d density, normalized 0–100 */
   const VELOCITY_SATURATION = 100;
@@ -143,33 +161,92 @@ export async function GET(
 
   const avg_importance_score = avgRow?.avg != null ? parseFloat(avgRow.avg) : 0;
 
-  // 4. Fetch co-occurring entities
+  // Compute trend direction based on 7d vs prior 7d within 30d window
+  const prior7d = count30d - count7d;
+  const trend: 'rising' | 'falling' | 'stable' =
+    count7d > prior7d * 1.2 ? 'rising' :
+    count7d < prior7d * 0.8 ? 'falling' : 'stable';
+
+  // 4. Fetch co-occurring entities (with type for categorization)
   const relatedEntities = await dbQuery<RelatedEntityRow>`
-    SELECT e2.name, COUNT(*) AS mentions
+    SELECT e2.name, e2.type, COUNT(*) AS mentions
     FROM signal_entities se
     JOIN entities e1 ON e1.id = se.entity_id
     JOIN signal_entities se2 ON se2.signal_id = se.signal_id
     JOIN entities e2 ON e2.id = se2.entity_id
     WHERE e1.name = ${entityName}
       AND e2.name != ${entityName}
-    GROUP BY e2.name
+    GROUP BY e2.name, e2.type
     ORDER BY mentions DESC
     LIMIT 10
   `;
 
+  // 5. Major developments — top 5 signals by significance score
+  const majorDevelopments = await dbQuery<SignalRow>`
+    SELECT
+      s.id, s.title, s.summary, s.description,
+      s.category, s.signal_type, s.confidence, s.confidence_score,
+      s.intelligence_score, s.significance_score, s.trust_score, s.created_at
+    FROM signals s
+    JOIN signal_entities se ON se.signal_id = s.id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ${entityName}
+      AND s.significance_score IS NOT NULL
+    ORDER BY s.significance_score DESC, s.created_at DESC
+    LIMIT 5
+  `;
+
+  // 6. Source coverage — count distinct source_support_count entries
+  const [sourceCoverage] = await dbQuery<SourceCountRow>`
+    SELECT COUNT(DISTINCT s.source_support_count) AS distinct_sources
+    FROM signals s
+    JOIN signal_entities se ON se.signal_id = s.id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ${entityName}
+      AND s.source_support_count IS NOT NULL
+      AND s.source_support_count > 0
+  `;
+
+  // 7. First seen date — earliest signal for this entity
+  const [firstSeenRow] = await dbQuery<{ first_seen: string }>`
+    SELECT MIN(s.created_at) AS first_seen
+    FROM signals s
+    JOIN signal_entities se ON se.signal_id = s.id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ${entityName}
+  `;
+
+  // 8. Last activity — most recent signal for this entity
+  const [lastActivityRow] = await dbQuery<{ last_activity: string }>`
+    SELECT MAX(s.created_at) AS last_activity
+    FROM signals s
+    JOIN signal_entities se ON se.signal_id = s.id
+    JOIN entities e ON e.id = se.entity_id
+    WHERE e.name = ${entityName}
+  `;
+
   return NextResponse.json({
     ok: true,
-    entity,
+    entity: {
+      ...entity,
+      first_seen: firstSeenRow?.first_seen ?? null,
+      last_activity: lastActivityRow?.last_activity ?? null,
+    },
     metrics: {
       signals_last_24h:     count24h,
       signals_last_7d:      count7d,
+      signals_last_30d:     count30d,
       avg_importance_score: Math.round(avg_importance_score * 100) / 100,
       velocity_score:       Math.round(velocity_score * 100) / 100,
+      trend,
     },
     related_entities: relatedEntities.map((r) => ({
       name:     r.name,
+      type:     r.type,
       mentions: parseInt(r.mentions, 10),
     })),
     recent_signals: recentSignals,
+    major_developments: majorDevelopments,
+    source_coverage: parseInt(sourceCoverage?.distinct_sources ?? '0', 10),
   });
 }
