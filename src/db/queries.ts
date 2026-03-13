@@ -53,6 +53,12 @@ interface SignalRow {
   date: string | null;
   created_at: string;
 
+  // ── Significance columns (migration 008) ──
+  /** Composite significance score (0–100), null for pre-migration rows */
+  significance_score: number | null;
+  /** Number of distinct sources corroborating this signal */
+  source_support_count: number | null;
+
   // ── Context columns — present only when queried with LEFT JOIN on signal_contexts ──
   /** Primary key of the joined context row; null when no ready context exists. */
   ctx_id?: string | null;
@@ -162,6 +168,8 @@ function rowToSignal(row: SignalRow): Signal {
     summary:    row.summary ?? row.description,
     date:       row.date ?? row.created_at,
     confidence,
+    significanceScore:  row.significance_score ?? undefined,
+    sourceSupportCount: row.source_support_count ?? undefined,
     ...(context !== undefined ? { context } : {}),
   };
 }
@@ -289,6 +297,8 @@ export async function getSignals(
           s.confidence_score,
           s.date,
           s.created_at,
+          s.significance_score,
+          s.source_support_count,
           sc.id                     AS ctx_id,
           sc.summary                AS ctx_summary,
           sc.why_it_matters         AS ctx_why_it_matters,
@@ -326,7 +336,9 @@ export async function getSignals(
         confidence,
         confidence_score,
         date,
-        created_at
+        created_at,
+        significance_score,
+        source_support_count
       FROM signals
       WHERE status IS NULL OR status NOT IN ('rejected')
       ORDER BY created_at DESC
@@ -339,6 +351,7 @@ export async function getSignals(
   // Convert the 0-100 integer threshold to the 0-1 NUMERIC scale used by
   // confidence_score.  Rows without a confidence_score are included (legacy).
   const minCs = config.minConfidence / 100;
+  const minSig = config.minSignificance;
 
   if (hasContextTable) {
     // Single query: signals LEFT JOIN signal_contexts (status='ready').
@@ -358,6 +371,8 @@ export async function getSignals(
         s.confidence_score,
         s.date,
         s.created_at,
+        s.significance_score,
+        s.source_support_count,
         sc.id                     AS ctx_id,
         sc.summary                AS ctx_summary,
         sc.why_it_matters         AS ctx_why_it_matters,
@@ -377,6 +392,7 @@ export async function getSignals(
         ON sc.signal_id = s.id AND sc.status = 'ready'
       WHERE (s.status IS NULL OR s.status IN ('auto', 'published'))
         AND (s.confidence_score IS NULL OR s.confidence_score >= ${minCs})
+        AND (${minSig} = 0 OR s.significance_score IS NULL OR s.significance_score >= ${minSig})
       ORDER BY
         s.significance_score DESC NULLS LAST,
         s.confidence_score DESC NULLS LAST,
@@ -400,10 +416,13 @@ export async function getSignals(
       confidence,
       confidence_score,
       date,
-      created_at
+      created_at,
+      significance_score,
+      source_support_count
     FROM signals
     WHERE (status IS NULL OR status IN ('auto', 'published'))
       AND (confidence_score IS NULL OR confidence_score >= ${minCs})
+      AND (${minSig} = 0 OR significance_score IS NULL OR significance_score >= ${minSig})
     ORDER BY
       significance_score DESC NULLS LAST,
       confidence_score DESC NULLS LAST,
