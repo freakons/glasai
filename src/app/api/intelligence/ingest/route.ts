@@ -54,11 +54,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Evaluate trust ────────────────────────────────────────────────────────
-  const { status, trust_score } = evaluateSignalTrust({
+  const trustResult = evaluateSignalTrust({
     confidence,
     source:   typeof source   === 'string' ? source   : undefined,
     ai_model: typeof ai_model === 'string' ? ai_model : undefined,
   });
+  const { status, trust_score } = trustResult;
 
   // ── Persist to database ───────────────────────────────────────────────────
   const id = crypto.randomUUID();
@@ -135,5 +136,6 @@ export async function POST(req: NextRequest) {
     id,
     status,
     trust_score,
+    ...(trustResult.source_trust ? { source_trust: trustResult.source_trust } : {}),
   }, { status: 201 });
 }

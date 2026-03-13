@@ -13,6 +13,7 @@
  */
 
 import type { SignalType } from '@/types/intelligence';
+import { computeWeightedSourceTrust } from '@/lib/sourceTrust';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -58,6 +59,14 @@ export interface SignificanceInput {
    * across supporting events.  Broader entity coverage = broader impact.
    */
   entityCount: number;
+
+  /**
+   * Optional list of source identifiers (registry IDs, names, or domains)
+   * that contributed events to this signal.  When provided, enables a source
+   * trust quality component that rewards signals backed by credible sources.
+   * When absent, the source trust component uses a neutral midpoint.
+   */
+  sourceIds?: string[];
 }
 
 /**
@@ -80,6 +89,8 @@ export interface SignificanceResult {
     confidence: number;
     /** Source diversity component (0–100 before weighting). */
     sourceDiversity: number;
+    /** Source trust quality component (0–100 before weighting). */
+    sourceTrustQuality: number;
     /** Velocity component (0–100 before weighting). */
     velocity: number;
     /** Signal type strategic weight (0–100 before weighting). */
@@ -113,11 +124,12 @@ const DEFAULT_TYPE_WEIGHT = 60;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const COMPONENT_WEIGHTS = {
-  confidence:    0.35,  // Confidence remains the primary signal of validity
-  sourceDiversity: 0.25, // Source corroboration is the second most important factor
-  velocity:      0.20,  // How fast events are clustering matters for timeliness
-  typeWeight:    0.10,  // Strategic category boost
-  entitySpread:  0.10,  // Breadth of impact across the AI ecosystem
+  confidence:        0.30,  // Confidence remains the primary signal of validity
+  sourceDiversity:   0.20,  // Source corroboration (distinct source count)
+  sourceTrustQuality: 0.10, // Quality/credibility of contributing sources
+  velocity:          0.20,  // How fast events are clustering matters for timeliness
+  typeWeight:        0.10,  // Strategic category boost
+  entitySpread:      0.10,  // Breadth of impact across the AI ecosystem
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +205,15 @@ function scoreEntitySpread(entityCount: number): number {
   return toScore(entityCount / ENTITY_SATURATION);
 }
 
+/**
+ * Source trust quality: weighted trust score of contributing sources.
+ * Returns a neutral 50 when no source IDs are provided (backward-compatible).
+ */
+function scoreSourceTrustQuality(sourceIds?: string[]): number {
+  if (!sourceIds || sourceIds.length === 0) return 50;
+  return computeWeightedSourceTrust(sourceIds);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main export
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,24 +251,27 @@ export function computeSignificance(input: SignificanceInput): SignificanceResul
     eventCount,
     windowHours,
     entityCount,
+    sourceIds,
   } = input;
 
   // --- per-component scores (0–100) ---
   const components = {
-    confidence:      scoreConfidence(confidenceScore),
-    sourceDiversity: scoreSourceDiversity(sourceCount),
-    velocity:        scoreVelocity(eventCount, windowHours),
-    typeWeight:      scoreTypeWeight(signalType),
-    entitySpread:    scoreEntitySpread(entityCount),
+    confidence:        scoreConfidence(confidenceScore),
+    sourceDiversity:   scoreSourceDiversity(sourceCount),
+    sourceTrustQuality: scoreSourceTrustQuality(sourceIds),
+    velocity:          scoreVelocity(eventCount, windowHours),
+    typeWeight:        scoreTypeWeight(signalType),
+    entitySpread:      scoreEntitySpread(entityCount),
   };
 
   // --- weighted composite ---
   const raw =
-    components.confidence      * COMPONENT_WEIGHTS.confidence      +
-    components.sourceDiversity * COMPONENT_WEIGHTS.sourceDiversity  +
-    components.velocity        * COMPONENT_WEIGHTS.velocity         +
-    components.typeWeight      * COMPONENT_WEIGHTS.typeWeight       +
-    components.entitySpread    * COMPONENT_WEIGHTS.entitySpread;
+    components.confidence        * COMPONENT_WEIGHTS.confidence        +
+    components.sourceDiversity   * COMPONENT_WEIGHTS.sourceDiversity   +
+    components.sourceTrustQuality * COMPONENT_WEIGHTS.sourceTrustQuality +
+    components.velocity          * COMPONENT_WEIGHTS.velocity          +
+    components.typeWeight        * COMPONENT_WEIGHTS.typeWeight        +
+    components.entitySpread      * COMPONENT_WEIGHTS.entitySpread;
 
   const significanceScore = Math.round(clamp01(raw / 100) * 100);
 
