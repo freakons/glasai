@@ -75,6 +75,13 @@ export interface SignalModeConfig {
    * The resolved per-rule minCount is always clamped to a minimum of 1.
    */
   engineMinCountMultiplier: number;
+
+  /**
+   * Minimum significance_score (0–100) required to surface a signal on the
+   * read path.  0 = no significance filtering.  Rows with NULL significance
+   * are always included (legacy backward compatibility via NULLS LAST ordering).
+   */
+  minSignificance: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +105,7 @@ export const SIGNAL_MODES: Record<SignalMode, SignalModeConfig> = {
     allowedStatuses:          null, // everything except 'rejected'
     defaultLimit:             200,
     engineMinCountMultiplier: 0.5,
+    minSignificance:          0,
   },
 
   /**
@@ -116,6 +124,7 @@ export const SIGNAL_MODES: Record<SignalMode, SignalModeConfig> = {
     allowedStatuses:          ['auto', 'published'],
     defaultLimit:             50,
     engineMinCountMultiplier: 1.0,
+    minSignificance:          0,
   },
 
   /**
@@ -136,6 +145,7 @@ export const SIGNAL_MODES: Record<SignalMode, SignalModeConfig> = {
     allowedStatuses:          ['auto', 'published'],
     defaultLimit:             20,
     engineMinCountMultiplier: 1.0,
+    minSignificance:          50,
   },
 };
 

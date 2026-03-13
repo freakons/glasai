@@ -42,6 +42,7 @@ import { MOCK_SIGNALS }        from '@/data/mockSignals';
 import { computeSignalScore }  from '@/lib/signals/signalScore';
 import { rankOpportunities }   from '@/lib/signals/opportunityRanker';
 import { computeMarketPulse }  from '@/lib/signals/marketPulse';
+import { computeRankScore }    from '@/lib/signals/rankScore';
 import type { Signal }         from '@/data/mockSignals';
 import type { SignalInput, TrendDirection } from '@/lib/signals/signalScore';
 import type { SignalCandidate } from '@/lib/signals/opportunityRanker';
@@ -177,14 +178,27 @@ export async function GET() {
   }
 
   // ── 2. Score each signal ──────────────────────────────────────────────────
-  // computeSignalScore() is pure/synchronous — no async overhead.
+  // computeSignalScore() produces the base opportunity score; we then blend
+  // in significance via computeRankScore() so that strategically important
+  // signals get a proportional lift in opportunity ranking.
   const candidates: SignalCandidate[] = raw.map((signal) => {
     const input  = toSignalInput(signal);
     const result = computeSignalScore(input);
 
+    // Blend significance: use rankScore's freshness-weighted significance
+    // as a 30% boost on top of the opportunity-specific base score.
+    // This ensures high-significance signals surface higher in opportunities
+    // without overriding the market-specific scoring model.
+    const { rankScore } = computeRankScore({
+      significanceScore: signal.significanceScore ?? null,
+      confidenceScore:   signal.confidence,
+      createdAt:         signal.date,
+    });
+    const blendedScore = Math.round(result.score * 0.7 + rankScore * 0.3);
+
     return {
       symbol:      result.symbol,
-      score:       result.score,
+      score:       blendedScore,
       direction:   result.direction,
       velocity:    input.velocity,
       volumeSpike: input.volumeSpike,

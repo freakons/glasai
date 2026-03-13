@@ -59,6 +59,8 @@ export const MOCK_SIGNALS: Signal[] = [
     date: '2026-03-05',
     confidence: 82,
     relatedIds: ['sig-007'],
+    significanceScore: 78,
+    sourceSupportCount: 4,
   },
   {
     id: 'sig-002',
@@ -70,6 +72,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'Round led by Google and Spark Capital. Proceeds earmarked for interpretability research and compute expansion.',
     date: '2026-03-01',
     confidence: 96,
+    significanceScore: 92,
+    sourceSupportCount: 6,
   },
   {
     id: 'sig-003',
@@ -81,6 +85,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'European AI Office opens formal review of Gemini Ultra deployment under high-risk AI provisions.',
     date: '2026-02-28',
     confidence: 91,
+    significanceScore: 85,
+    sourceSupportCount: 5,
   },
   {
     id: 'sig-004',
@@ -93,6 +99,8 @@ export const MOCK_SIGNALS: Signal[] = [
     date: '2026-02-25',
     confidence: 99,
     relatedIds: ['sig-009'],
+    significanceScore: 88,
+    sourceSupportCount: 7,
   },
   {
     id: 'sig-005',
@@ -104,6 +112,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'Strategic buy secures sovereign cloud inference capacity across EU data-centres ahead of regulation.',
     date: '2026-02-20',
     confidence: 88,
+    significanceScore: 72,
+    sourceSupportCount: 3,
   },
   {
     id: 'sig-006',
@@ -115,6 +125,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'Grok-3 scores 94.7% on ARC-AGI, the highest any closed model has reached. Full paper released concurrently.',
     date: '2026-02-18',
     confidence: 95,
+    significanceScore: 83,
+    sourceSupportCount: 4,
   },
   {
     id: 'sig-007',
@@ -127,6 +139,8 @@ export const MOCK_SIGNALS: Signal[] = [
     date: '2026-02-15',
     confidence: 99,
     relatedIds: ['sig-001'],
+    significanceScore: 80,
+    sourceSupportCount: 5,
   },
   {
     id: 'sig-008',
@@ -138,6 +152,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'New module predicts small-molecule binding with 89% accuracy; partnership with Novartis announced.',
     date: '2026-02-12',
     confidence: 93,
+    significanceScore: 76,
+    sourceSupportCount: 3,
   },
   {
     id: 'sig-009',
@@ -150,6 +166,8 @@ export const MOCK_SIGNALS: Signal[] = [
     date: '2026-02-08',
     confidence: 87,
     relatedIds: ['sig-004'],
+    significanceScore: 70,
+    sourceSupportCount: 3,
   },
   {
     id: 'sig-010',
@@ -161,6 +179,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'SoftBank Vision Fund 3 leads round; company targets 100M MAU by year-end with Spaces product.',
     date: '2026-02-05',
     confidence: 97,
+    significanceScore: 82,
+    sourceSupportCount: 5,
   },
   {
     id: 'sig-011',
@@ -172,6 +192,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'New RLHF variant uses model-written critiques with provable safety bounds; Claude 4 will ship with it.',
     date: '2026-01-30',
     confidence: 90,
+    significanceScore: 74,
+    sourceSupportCount: 2,
   },
   {
     id: 'sig-012',
@@ -183,6 +205,8 @@ export const MOCK_SIGNALS: Signal[] = [
       'TSMC ramp unlocks 30% more B300 wafers per month; hyperscaler allocation resumes normal lead times.',
     date: '2026-01-28',
     confidence: 85,
+    significanceScore: 65,
+    sourceSupportCount: 3,
   },
 ];
 
