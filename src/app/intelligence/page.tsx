@@ -1,14 +1,16 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
-import { getSiteStats } from '@/db/queries';
+import { getSignals, getSiteStats } from '@/db/queries';
 import { siteConfig } from '@/config/site';
 import { MODELS } from '@/lib/data/models';
 import { FUNDING_ROUNDS } from '@/lib/data/funding';
 import { sumFundingRounds, formatFundingTotal } from '@/lib/parseFundingAmount';
 import { NewsCard } from '@/components/cards/NewsCard';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
+import { SignalCard } from '@/components/cards/SignalCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { IntelligenceFilters } from './filters';
 import { CommandBar } from '@/ui/layout/CommandBar';
+import { composeFeed } from '@/lib/signals/feedComposer';
 
 import type { Metadata } from 'next';
 
@@ -26,11 +28,15 @@ const STATS_FALLBACK = {
 };
 
 export default async function IntelligencePage() {
-  const [articles, featured, live] = await Promise.all([
+  const [articles, featured, live, rawSignals] = await Promise.all([
     fetchArticles(),
     fetchFeaturedArticle(),
     getSiteStats().catch(() => STATS_FALLBACK),
+    getSignals(50, 'standard').catch(() => []),
   ]);
+
+  // Compose the signal feed with diversity + dedup + ranking
+  const composedSignals = composeFeed(rawSignals, { minSignificance: 30 });
 
   // Core counts — live from DB, fallback to siteConfig / static array lengths
   const signals     = live.signals     > 0 ? String(live.signals)     : String(siteConfig.stats.signals);
@@ -59,11 +65,23 @@ export default async function IntelligencePage() {
 
       <IntelligenceFilters />
 
-      <div className="news-grid">
-        {articles.filter(a => !a.featured).map((article) => (
-          <NewsCard key={article.id} article={article} />
-        ))}
-      </div>
+      {/* Signal-based intelligence feed (ranked, deduplicated, diversity-enforced) */}
+      {composedSignals.length > 0 && (
+        <div className="news-grid">
+          {composedSignals.map((signal) => (
+            <SignalCard key={signal.id} signal={signal} />
+          ))}
+        </div>
+      )}
+
+      {/* Article-based news grid (fallback when no signals available) */}
+      {composedSignals.length === 0 && (
+        <div className="news-grid">
+          {articles.filter(a => !a.featured).map((article) => (
+            <NewsCard key={article.id} article={article} />
+          ))}
+        </div>
+      )}
 
       <CommandBar />
     </>
