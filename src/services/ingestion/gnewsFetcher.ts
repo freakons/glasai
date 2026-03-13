@@ -32,7 +32,8 @@ import {
   normalizeSourceName,
   normalizeTimestamp,
   generateArticleId,
-  generateEventId,
+  generateStableEventId,
+  generateTitleFingerprint,
   categoryToEventType,
   categoryToDbCategory,
 } from '../normalization/helpers';
@@ -208,7 +209,8 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
       const eventType = categoryToEventType(category);
       const dbCategory = categoryToDbCategory(category);
       const articleId = generateArticleId(cleanUrl);
-      const eventId = generateEventId(cleanUrl, 'gnews');
+      const eventId = generateStableEventId(cleanUrl);
+      const titleFingerprint = generateTitleFingerprint(cleanTitle);
 
       // Step 1: Write to articles table first.
       // This must succeed before the event insert to satisfy the FK constraint:
@@ -223,6 +225,7 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
           url: cleanUrl,
           publishedAt,
           category: dbCategory,
+          titleFingerprint,
         });
       } catch (err) {
         console.error(`[ingest:gnews] Article save failed for "${cleanUrl}":`, err);

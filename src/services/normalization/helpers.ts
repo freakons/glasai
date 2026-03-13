@@ -18,16 +18,26 @@
  * with different tracking parameters across feeds.
  */
 const TRACKING_PARAMS = new Set([
+  // UTM
   'utm_source',
   'utm_medium',
   'utm_campaign',
   'utm_term',
   'utm_content',
+  // Referral / attribution
   'ref',
   'source',
+  // Social / ad click IDs
   'fbclid',
   'gclid',
   'msclkid',
+  'dclid',
+  'twclid',
+  'li_fat_id',
+  'ttclid',
+  'wbraid',
+  'gbraid',
+  // Email / marketing
   'mc_cid',
   'mc_eid',
   'oly_anon_id',
@@ -35,15 +45,27 @@ const TRACKING_PARAMS = new Set([
   '_hsenc',
   '_hsmi',
   'vero_id',
+  'mkt_tok',
+  // Analytics / misc
+  '_ga',
+  '_gl',
+  'ns_mchannel',
+  'ns_source',
+  'ns_campaign',
+  'ns_linkname',
+  'ns_fee',
 ]);
 
 /**
  * Canonicalizes a URL for consistent storage and dedup:
- *   1. Strips tracking/analytics query parameters
- *   2. Removes trailing slashes from the path (unless path is just "/")
- *   3. Lowercases the hostname
- *   4. Removes default ports (80 for http, 443 for https)
- *   5. Removes the fragment/hash
+ *   1. Normalizes http → https
+ *   2. Strips www. prefix from hostname
+ *   3. Strips tracking/analytics query parameters
+ *   4. Sorts remaining query parameters alphabetically
+ *   5. Removes trailing slashes from the path (unless path is just "/")
+ *   6. Lowercases the hostname
+ *   7. Removes default ports (80 for http, 443 for https)
+ *   8. Removes the fragment/hash
  *
  * Returns the original string if the URL is malformed.
  */
@@ -51,6 +73,16 @@ export function canonicalizeUrl(url: string): string {
   if (!url) return url;
   try {
     const parsed = new URL(url.trim());
+
+    // Normalize http → https
+    if (parsed.protocol === 'http:') {
+      parsed.protocol = 'https:';
+    }
+
+    // Strip www. prefix from hostname
+    if (parsed.hostname.startsWith('www.')) {
+      parsed.hostname = parsed.hostname.slice(4);
+    }
 
     // Strip tracking params
     const keysToDelete: string[] = [];
@@ -62,6 +94,9 @@ export function canonicalizeUrl(url: string): string {
     for (const key of keysToDelete) {
       parsed.searchParams.delete(key);
     }
+
+    // Sort remaining query parameters for consistent ordering
+    parsed.searchParams.sort();
 
     // Remove fragment
     parsed.hash = '';
@@ -253,9 +288,64 @@ export function generateArticleId(url: string): string {
  * Generates a stable event ID: `<prefix>_<hash>`.
  * @param url     The source article URL (should be canonicalized).
  * @param prefix  ID prefix, e.g. 'rss', 'gnews', 'evt'.
+ *
+ * @deprecated Use generateStableEventId() for new code. Source-specific
+ * prefixes cause the same article from RSS and GNews to produce separate
+ * events, defeating cross-source deduplication.
  */
 export function generateEventId(url: string, prefix: string): string {
   return `${prefix}_${stringHash(url)}`;
+}
+
+/**
+ * Generates a source-agnostic event ID: `evt_<hash>`.
+ *
+ * Unlike generateEventId(), this always uses the `evt_` prefix so the same
+ * article URL produces the same event ID regardless of whether it arrived
+ * via RSS, GNews, or any future source. This ensures cross-source event
+ * deduplication works correctly via ON CONFLICT (id) DO NOTHING.
+ *
+ * @param url  The source article URL (should be canonicalized).
+ */
+export function generateStableEventId(url: string): string {
+  return `evt_${stringHash(url)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Title fingerprinting (near-duplicate detection)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes a title for fingerprinting purposes:
+ *   1. Lowercases the entire string
+ *   2. Strips all non-alphanumeric characters (keeps letters and digits)
+ *   3. Collapses whitespace
+ *   4. Trims
+ *
+ * This produces a stable key for detecting near-duplicate titles that differ
+ * only in punctuation, casing, or whitespace. Intentionally aggressive —
+ * "OpenAI Releases GPT-5!" and "OpenAI releases GPT-5" become the same.
+ */
+export function normalizeTitle(title: string): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Generates a deterministic fingerprint from a title for near-duplicate detection.
+ * Uses the same djb2 hash as article IDs, applied to the normalized title.
+ *
+ * Two articles with the same title fingerprint and overlapping publish times
+ * are likely the same story from different sources/URLs.
+ */
+export function generateTitleFingerprint(title: string): string {
+  const normalized = normalizeTitle(title);
+  if (!normalized) return '';
+  return `tfp_${stringHash(normalized)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -30,7 +30,8 @@ import {
   normalizeSourceName,
   normalizeTimestamp,
   generateArticleId,
-  generateEventId,
+  generateStableEventId,
+  generateTitleFingerprint,
   categoryToEventType,
   categoryToDbCategory,
 } from '../normalization/helpers';
@@ -176,7 +177,8 @@ export async function ingestRss(): Promise<RssIngestResult> {
       const eventType = categoryToEventType(intelligenceCategory);
 
       const articleId = generateArticleId(cleanUrl);
-      const eventId = generateEventId(cleanUrl, 'rss');
+      const eventId = generateStableEventId(cleanUrl);
+      const titleFingerprint = generateTitleFingerprint(cleanTitle);
 
       // Step 1: Write to articles table first.
       // Must succeed before writing the event — events.source_article_id
@@ -190,6 +192,7 @@ export async function ingestRss(): Promise<RssIngestResult> {
           url: cleanUrl,
           publishedAt,
           category: dbCategory,
+          titleFingerprint,
         });
 
         if (articleInserted) {
