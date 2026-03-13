@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
  *
  * POST /api/snapshots
  *   Generates a new snapshot from recently stored signals and persists it.
- *   Requires: secret via query param or x-vercel-cron-secret header.
+ *   Requires: Authorization: Bearer <CRON_SECRET> header or ?secret= query param.
  *   Body (optional JSON):
  *     { signalLimit?: number }  — how many recent signals to include (default 50)
  */
