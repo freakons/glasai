@@ -511,6 +511,32 @@ body {
 .nc-body { font-size: 13px; color: var(--text2); line-height: 1.7; margin-bottom: 14px; }
 .nc-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--border); font-family: var(--fm); font-size: 10.5px; color: var(--text3); }
 .nc-src { display: flex; align-items: center; gap: 4px; }
+.nc-why {
+  font-size: 12px; color: var(--text2); line-height: 1.6;
+  padding: 8px 10px; margin-bottom: 12px;
+  border-left: 2px solid rgba(79,70,229,0.35);
+  background: rgba(79,70,229,0.04); border-radius: 0 6px 6px 0;
+}
+
+/* Significance tier indicators */
+.nc-critical { border-color: rgba(79,70,229,0.35); }
+.nc-critical::before { background: linear-gradient(90deg, var(--indigo), var(--violet)); transform: scaleX(1) !important; }
+.nc-high { border-color: rgba(6,182,212,0.25); }
+
+.sig-badge {
+  font-family: var(--fm); font-size: 8px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; line-height: 1.4;
+}
+.sig-critical {
+  color: var(--indigo-l); background: rgba(79,70,229,0.14); border: 1px solid rgba(79,70,229,0.3);
+}
+.sig-high {
+  color: var(--cyan-l); background: rgba(6,182,212,0.1); border: 1px solid rgba(6,182,212,0.25);
+}
+.corroboration-badge {
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--fm); font-size: 8.5px; color: rgba(52,211,153,0.75);
+}
 
 /* Featured card */
 .featured {

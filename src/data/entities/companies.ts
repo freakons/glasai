@@ -51,7 +51,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'foundation_models',
     website: 'https://openai.com',
-    aliases: ['Open AI'],
+    aliases: ['Open AI', 'OpenAI Inc', 'OpenAI Inc.'],
     founded: 2015,
   },
   {
@@ -60,6 +60,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'foundation_models',
     website: 'https://anthropic.com',
+    aliases: ['Anthropic AI', 'Anthropic PBC'],
     founded: 2021,
   },
   {
@@ -68,7 +69,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'GB',
     sector: 'foundation_models',
     website: 'https://deepmind.google',
-    aliases: ['DeepMind', 'Google Brain'],
+    aliases: ['DeepMind', 'Google Brain', 'Google AI', 'Alphabet AI'],
     ticker: 'GOOGL',
     founded: 2023,
   },
@@ -78,7 +79,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'foundation_models',
     website: 'https://ai.meta.com',
-    aliases: ['Meta Platforms AI', 'Facebook AI Research', 'FAIR'],
+    aliases: ['Meta Platforms AI', 'Facebook AI Research', 'Meta Platforms', 'Meta'],
     ticker: 'META',
     founded: 2023,
   },
@@ -88,6 +89,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'FR',
     sector: 'foundation_models',
     website: 'https://mistral.ai',
+    aliases: ['Mistral', 'MistralAI'],
     founded: 2023,
   },
   {
@@ -96,6 +98,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'CA',
     sector: 'foundation_models',
     website: 'https://cohere.com',
+    aliases: ['Cohere AI', 'Cohere Inc'],
     founded: 2019,
   },
   {
@@ -104,7 +107,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'GB',
     sector: 'foundation_models',
     website: 'https://stability.ai',
-    aliases: ['StabilityAI'],
+    aliases: ['StabilityAI', 'Stability'],
     founded: 2020,
   },
   {
@@ -113,7 +116,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'foundation_models',
     website: 'https://x.ai',
-    aliases: ['Elon Musk AI', 'X AI'],
+    aliases: ['Elon Musk AI', 'X AI', 'x.ai'],
     founded: 2023,
   },
   {
@@ -131,7 +134,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'semiconductors',
     website: 'https://nvidia.com',
-    aliases: ['Nvidia'],
+    aliases: ['Nvidia', 'NVDA'],
     ticker: 'NVDA',
     founded: 1993,
   },
@@ -141,9 +144,56 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'enterprise_software',
     website: 'https://microsoft.com',
-    aliases: ['MSFT'],
+    aliases: ['Microsoft Corp', 'Microsoft Corporation', 'MSFT'],
     ticker: 'MSFT',
     founded: 1975,
+  },
+  {
+    id: 'amazon',
+    name: 'Amazon',
+    country: 'US',
+    sector: 'enterprise_software',
+    website: 'https://aws.amazon.com',
+    aliases: ['Amazon Web Services', 'AWS', 'Amazon AI'],
+    ticker: 'AMZN',
+    founded: 1994,
+  },
+  {
+    id: 'apple',
+    name: 'Apple',
+    country: 'US',
+    sector: 'consumer',
+    website: 'https://apple.com',
+    aliases: ['Apple Inc', 'Apple Intelligence'],
+    ticker: 'AAPL',
+    founded: 1976,
+  },
+  {
+    id: 'samsung',
+    name: 'Samsung',
+    country: 'KR',
+    sector: 'semiconductors',
+    website: 'https://samsung.com',
+    aliases: ['Samsung Electronics', 'Samsung AI'],
+    founded: 1938,
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    country: 'CN',
+    sector: 'foundation_models',
+    website: 'https://deepseek.com',
+    aliases: ['Deep Seek', 'DeepSeek AI'],
+    founded: 2023,
+  },
+  {
+    id: 'baidu',
+    name: 'Baidu',
+    country: 'CN',
+    sector: 'foundation_models',
+    website: 'https://baidu.com',
+    aliases: ['Baidu AI', 'Baidu Inc'],
+    founded: 2000,
   },
   {
     id: 'scale_ai',
@@ -160,7 +210,7 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'ai_infrastructure',
     website: 'https://huggingface.co',
-    aliases: ['HuggingFace'],
+    aliases: ['HuggingFace', 'Hugging Face Inc'],
     founded: 2016,
   },
   {
@@ -178,7 +228,44 @@ export const COMPANIES: CompanyEntity[] = [
     country: 'US',
     sector: 'foundation_models',
     website: 'https://inflection.ai',
+    aliases: ['Inflection'],
     founded: 2022,
+  },
+  {
+    id: 'databricks',
+    name: 'Databricks',
+    country: 'US',
+    sector: 'ai_infrastructure',
+    website: 'https://databricks.com',
+    aliases: ['Databricks Inc', 'Mosaic ML', 'MosaicML'],
+    founded: 2013,
+  },
+  {
+    id: 'ai21_labs',
+    name: 'AI21 Labs',
+    country: 'IL',
+    sector: 'foundation_models',
+    website: 'https://ai21.com',
+    aliases: ['AI21', 'AI21Labs'],
+    founded: 2017,
+  },
+  {
+    id: 'character_ai',
+    name: 'Character.AI',
+    country: 'US',
+    sector: 'consumer',
+    website: 'https://character.ai',
+    aliases: ['Character AI', 'CharacterAI'],
+    founded: 2021,
+  },
+  {
+    id: 'runway',
+    name: 'Runway',
+    country: 'US',
+    sector: 'applied_ai',
+    website: 'https://runwayml.com',
+    aliases: ['Runway ML', 'RunwayML'],
+    founded: 2018,
   },
 ];
 
@@ -194,15 +281,28 @@ export function getCompanyById(id: string): CompanyEntity | undefined {
 /**
  * Resolve a free-text company name (from an article or event) to the canonical
  * CompanyEntity by matching against id, name, and known aliases.
+ *
+ * Uses normalized comparison to handle punctuation/casing variants:
+ *   "Open AI" → OpenAI, "deepmind" → Google DeepMind, etc.
  */
 export function resolveCompany(nameOrAlias: string): CompanyEntity | undefined {
-  const normalised = nameOrAlias.toLowerCase().trim();
+  const normalised = normalizeForMatch(nameOrAlias);
   return COMPANIES.find(
     (c) =>
       c.id === normalised ||
-      c.name.toLowerCase() === normalised ||
-      c.aliases?.some((a) => a.toLowerCase() === normalised)
+      normalizeForMatch(c.name) === normalised ||
+      c.aliases?.some((a) => normalizeForMatch(a) === normalised)
   );
+}
+
+/** Normalize a name for matching: lowercase, strip punctuation, collapse spaces. */
+function normalizeForMatch(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[-_.,:;'"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export default COMPANIES;

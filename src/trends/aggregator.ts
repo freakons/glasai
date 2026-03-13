@@ -127,6 +127,12 @@ export async function aggregateTrends(signals: TrendSignal[]): Promise<TrendResu
     });
   }
 
-  // highest confidence first
-  return merged.sort((a, b) => b.confidence - a.confidence);
+  // Sort by importance (quality-weighted sum) first, then confidence as tie-breaker.
+  // This ensures trends backed by high-quality, diverse signals rank above
+  // those that merely have many low-quality mentions.
+  return merged.sort((a, b) => {
+    const impDiff = b.importance_score - a.importance_score;
+    if (impDiff !== 0) return impDiff;
+    return b.confidence - a.confidence;
+  });
 }

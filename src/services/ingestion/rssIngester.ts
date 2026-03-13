@@ -21,9 +21,21 @@
 import { fetchArticlesFromSources } from './rssFetcher';
 import { saveArticle } from '../storage/articleStore';
 import { saveEvent } from '../storage/eventStore';
-import { classifyArticle, type IntelligenceCategory } from '../intelligence/classifier';
+import { classifyArticle } from '../intelligence/classifier';
 import { INTELLIGENCE_SOURCES } from '../../config/intelligenceSources';
-import type { Event, EventType } from '@/types/intelligence';
+import type { Event } from '@/types/intelligence';
+import {
+  canonicalizeUrl,
+  cleanText,
+  normalizeSourceName,
+  normalizeTimestamp,
+  generateArticleId,
+  generateStableEventId,
+  generateTitleFingerprint,
+  categoryToEventType,
+  categoryToDbCategory,
+} from '../normalization/helpers';
+import { detectAndLinkEntities } from '@/lib/entityResolver';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Primary source selection
@@ -62,57 +74,7 @@ export interface RssIngestResult {
   eventsDeduped: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ID / category helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function urlHash(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    hash = (hash << 5) - hash + url.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(16).padStart(8, '0');
-}
-
-/** Stable article ID matching the articleStore convention: art_<urlhash16> */
-function urlToArticleId(url: string): string {
-  return `art_${urlHash(url)}`;
-}
-
-/** Stable event ID for RSS-derived events: rss_<urlhash16> */
-function urlToEventId(url: string): string {
-  return `rss_${urlHash(url)}`;
-}
-
-/** Map IntelligenceCategory → canonical EventType for the events table */
-function categoryToEventType(cat: IntelligenceCategory): EventType {
-  switch (cat) {
-    case 'MODEL_RELEASE': return 'model_release';
-    case 'FUNDING':       return 'funding';
-    case 'REGULATION':    return 'regulation';
-    case 'POLICY':        return 'policy';
-    case 'RESEARCH':      return 'research_breakthrough';
-    case 'COMPANY_MOVE':  return 'company_strategy';
-    default:              return 'other';
-  }
-}
-
-/**
- * Map IntelligenceCategory → DB-friendly category string used by
- * getArticles() in db/queries.ts (matches frontend ArticleCat type).
- */
-function categoryToDbCategory(cat: IntelligenceCategory): string {
-  switch (cat) {
-    case 'MODEL_RELEASE': return 'models';
-    case 'FUNDING':       return 'funding';
-    case 'REGULATION':    return 'regulation';
-    case 'POLICY':        return 'regulation';
-    case 'RESEARCH':      return 'research';
-    case 'COMPANY_MOVE':  return 'product';
-    default:              return 'research';
-  }
-}
+// ID / category helpers are now imported from normalization/helpers.ts
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main ingestion function
@@ -199,14 +161,25 @@ export async function ingestRss(): Promise<RssIngestResult> {
     for (const article of fetchResult.articles) {
       if (!article.url || !article.title) continue;
 
+      // ── Normalize fields before classification and storage ──────────────
+      const cleanTitle   = cleanText(article.title);
+      const cleanContent = cleanText(article.content);
+      const cleanExcerpt = cleanText(article.excerpt);
+      const cleanUrl     = canonicalizeUrl(article.url);
+      const sourceName   = normalizeSourceName(article.source);
+      const publishedAt  = normalizeTimestamp(article.publishedAt);
+
+      if (!cleanTitle || !cleanUrl) continue;
+
       // Classify on title + content/excerpt
-      const classifyText = article.title + ' ' + (article.content || article.excerpt || '');
+      const classifyText = cleanTitle + ' ' + (cleanContent || cleanExcerpt);
       const intelligenceCategory = classifyArticle(classifyText);
       const dbCategory = categoryToDbCategory(intelligenceCategory);
       const eventType = categoryToEventType(intelligenceCategory);
 
-      const articleId = urlToArticleId(article.url);
-      const eventId = urlToEventId(article.url);
+      const articleId = generateArticleId(cleanUrl);
+      const eventId = generateStableEventId(cleanUrl);
+      const titleFingerprint = generateTitleFingerprint(cleanTitle);
 
       // Step 1: Write to articles table first.
       // Must succeed before writing the event — events.source_article_id
@@ -215,11 +188,12 @@ export async function ingestRss(): Promise<RssIngestResult> {
       try {
         articleInserted = await saveArticle({
           id: articleId,
-          title: article.title,
-          source: article.source,
-          url: article.url,
-          publishedAt: article.publishedAt,
+          title: cleanTitle,
+          source: sourceName,
+          url: cleanUrl,
+          publishedAt,
           category: dbCategory,
+          titleFingerprint,
         });
 
         if (articleInserted) {
@@ -229,7 +203,7 @@ export async function ingestRss(): Promise<RssIngestResult> {
         }
       } catch (err) {
         console.error(
-          `[rssIngester] Article save failed source="${fetchResult.sourceId}" url="${article.url}":`,
+          `[rssIngester] Article save failed source="${fetchResult.sourceId}" url="${cleanUrl}":`,
           err
         );
         // Do not attempt event insert if article write failed
@@ -238,19 +212,30 @@ export async function ingestRss(): Promise<RssIngestResult> {
 
       // Step 2: Derive and persist event.
       // source_article_id references the article we just wrote above.
+      // Use entity detection to assign the correct company instead of sourceName.
+      const detected = detectAndLinkEntities(cleanTitle, cleanContent || cleanExcerpt);
+      const primaryCompany = detected.companies[0] ?? sourceName;
+      const entityTags = [
+        ...detected.companies,
+        ...detected.models,
+        ...detected.investors,
+      ];
+      const mergedTags = Array.from(new Set([...(article.tags ?? []), ...entityTags]));
+
       const event: Event = {
         id: eventId,
         type: eventType,
-        company: article.source,
-        title: article.title,
-        description: (article.excerpt || article.content || '').slice(0, 500),
-        timestamp: article.publishedAt,
-        tags: article.tags,
+        company: primaryCompany,
+        relatedModel: detected.models[0],
+        title: cleanTitle,
+        description: (cleanExcerpt || cleanContent).slice(0, 500),
+        timestamp: publishedAt,
+        tags: mergedTags.length > 0 ? mergedTags : article.tags,
         sourceArticle: {
           id: articleId,
-          title: article.title,
-          url: article.url,
-          source: article.source,
+          title: cleanTitle,
+          url: cleanUrl,
+          source: sourceName,
         },
       };
 
@@ -263,7 +248,7 @@ export async function ingestRss(): Promise<RssIngestResult> {
         }
       } catch (err) {
         console.error(
-          `[rssIngester] Event save failed source="${fetchResult.sourceId}" url="${article.url}":`,
+          `[rssIngester] Event save failed source="${fetchResult.sourceId}" url="${cleanUrl}":`,
           err
         );
       }

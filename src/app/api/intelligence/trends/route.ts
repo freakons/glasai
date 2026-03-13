@@ -19,6 +19,13 @@ interface TrendRow {
   velocity_score: number | null;
 }
 
+// Ranking model: Trends intentionally use importance_score (from the ranking
+// engine aggregator) rather than signal significance_score.  Trends aggregate
+// across multiple signals to surface "what's trending" — a different question
+// than "what's most strategically important" answered by significance.  The
+// importance_score composite (intelligence quality + source trust + velocity +
+// entity breadth) is purpose-built for trend detection and should remain the
+// primary sort here.
 export async function GET() {
   console.log('[api] API request: trends');
 
@@ -26,7 +33,7 @@ export async function GET() {
     const rows = await dbQuery<TrendRow>`
       SELECT topic, category, signal_count, entities, summary, confidence, score, importance_score, velocity_score
       FROM trends
-      ORDER BY confidence DESC
+      ORDER BY importance_score DESC NULLS LAST, confidence DESC
       LIMIT 20
     `;
 

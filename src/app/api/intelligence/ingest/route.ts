@@ -54,11 +54,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Evaluate trust ────────────────────────────────────────────────────────
-  const { status, trust_score } = evaluateSignalTrust({
+  const trustResult = evaluateSignalTrust({
     confidence,
     source:   typeof source   === 'string' ? source   : undefined,
     ai_model: typeof ai_model === 'string' ? ai_model : undefined,
   });
+  const { status, trust_score } = trustResult;
 
   // ── Persist to database ───────────────────────────────────────────────────
   const id = crypto.randomUUID();
@@ -100,17 +101,19 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Extract entities and persist graph edges ──────────────────────────────
+  // The extractor now returns canonical names linked to the internal registry.
+  // Registry-linked entities get higher confidence in the signal_entities edge.
   const signalText = `${title.trim()} ${typeof summary === 'string' ? summary : ''}`;
   try {
     const { entities } = await extractEntities(signalText);
 
     for (const entity of entities) {
-      const entityId = crypto.randomUUID();
+      const entityDbId = crypto.randomUUID();
 
-      // Upsert entity by name (unique index on entities.name)
+      // Upsert entity by canonical name (unique index on entities.name)
       const rows = await dbQuery<{ id: string }>`
         INSERT INTO entities (id, name, type, created_at)
-        VALUES (${entityId}, ${entity.name}, ${entity.type}, NOW())
+        VALUES (${entityDbId}, ${entity.name}, ${entity.type}, NOW())
         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
         RETURNING id
       `;
@@ -118,10 +121,14 @@ export async function POST(req: NextRequest) {
       const resolvedId = rows[0]?.id;
       if (!resolvedId) continue;
 
+      // Registry-linked entities get higher confidence (0.9) than
+      // unlinked LLM-extracted entities (0.7)
+      const edgeConfidence = entity.registryId ? 0.9 : 0.7;
+
       // Insert signal→entity edge (ignore if already exists)
       await dbQuery`
         INSERT INTO signal_entities (signal_id, entity_id, confidence)
-        VALUES (${id}, ${resolvedId}, ${0.8})
+        VALUES (${id}, ${resolvedId}, ${edgeConfidence})
         ON CONFLICT (signal_id, entity_id) DO NOTHING
       `;
     }
@@ -135,5 +142,6 @@ export async function POST(req: NextRequest) {
     id,
     status,
     trust_score,
+    ...(trustResult.source_trust ? { source_trust: trustResult.source_trust } : {}),
   }, { status: 201 });
 }

@@ -1,14 +1,13 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
-import { getSiteStats } from '@/db/queries';
-import { siteConfig } from '@/config/site';
-import { MODELS } from '@/lib/data/models';
-import { FUNDING_ROUNDS } from '@/lib/data/funding';
-import { sumFundingRounds, formatFundingTotal } from '@/lib/parseFundingAmount';
+import { getSignals, getSiteStats } from '@/db/queries';
+import { formatFundingTotal } from '@/lib/parseFundingAmount';
 import { NewsCard } from '@/components/cards/NewsCard';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
+import { SignalCard } from '@/components/cards/SignalCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { IntelligenceFilters } from './filters';
 import { CommandBar } from '@/ui/layout/CommandBar';
+import { composeFeed } from '@/lib/signals/feedComposer';
 
 import type { Metadata } from 'next';
 
@@ -26,24 +25,24 @@ const STATS_FALLBACK = {
 };
 
 export default async function IntelligencePage() {
-  const [articles, featured, live] = await Promise.all([
+  const [articles, featured, live, rawSignals] = await Promise.all([
     fetchArticles(),
     fetchFeaturedArticle(),
     getSiteStats().catch(() => STATS_FALLBACK),
+    getSignals(50, 'standard').catch(() => []),
   ]);
 
-  // Core counts — live from DB, fallback to siteConfig / static array lengths
-  const signals     = live.signals     > 0 ? String(live.signals)     : String(siteConfig.stats.signals);
-  const regulations = live.regulations > 0 ? String(live.regulations) : String(siteConfig.stats.regulations);
-  const sources     = live.sources     > 0 ? String(live.sources)     : String(siteConfig.stats.sources);
+  // Compose the signal feed with diversity + dedup + ranking
+  const composedSignals = composeFeed(rawSignals, { minSignificance: 30 });
 
-  // Model releases — live count; fallback to static MODELS array length
-  const modelCount  = live.models > 0 ? live.models : MODELS.length;
-
-  // Funding total — live DB aggregate if available; else compute from static data
+  // Core counts — live from DB only, no hardcoded fallbacks
+  const signals     = String(live.signals);
+  const regulations = String(live.regulations);
+  const sources     = String(live.sources);
+  const modelCount  = live.models;
   const fundingLabel = live.totalFundingUsdM > 0
     ? formatFundingTotal(live.totalFundingUsdM)
-    : formatFundingTotal(sumFundingRounds(FUNDING_ROUNDS) ?? 0) + '+';
+    : 'N/A';
 
   return (
     <>
@@ -59,11 +58,35 @@ export default async function IntelligencePage() {
 
       <IntelligenceFilters />
 
-      <div className="news-grid">
-        {articles.filter(a => !a.featured).map((article) => (
-          <NewsCard key={article.id} article={article} />
-        ))}
-      </div>
+      {/* Signal-based intelligence feed (ranked, deduplicated, diversity-enforced) */}
+      {composedSignals.length > 0 && (
+        <div className="news-grid">
+          {composedSignals.map((signal) => (
+            <SignalCard key={signal.id} signal={signal} />
+          ))}
+        </div>
+      )}
+
+      {/* Article-based news grid (fallback when no signals available) */}
+      {composedSignals.length === 0 && articles.length > 0 && (
+        <div className="news-grid">
+          {articles.filter(a => !a.featured).map((article) => (
+            <NewsCard key={article.id} article={article} />
+          ))}
+        </div>
+      )}
+
+      {/* Empty state when no data exists yet */}
+      {composedSignals.length === 0 && articles.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '64px 24px' }}>
+          <p style={{ fontFamily: 'var(--fs)', fontStyle: 'italic', fontSize: 18, color: 'var(--text2)', marginBottom: 8 }}>
+            No intelligence data yet
+          </p>
+          <p style={{ fontFamily: 'var(--fm)', fontSize: 11, color: 'var(--text3)', letterSpacing: '0.04em' }}>
+            The intelligence feed will populate automatically as the pipeline ingests data.
+          </p>
+        </div>
+      )}
 
       <CommandBar />
     </>

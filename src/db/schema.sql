@@ -7,18 +7,20 @@
 -- Stores raw and normalised articles ingested from RSS / news sources.
 
 CREATE TABLE IF NOT EXISTS articles (
-  id           TEXT        PRIMARY KEY,
-  title        TEXT        NOT NULL,
-  source       TEXT        NOT NULL,
-  url          TEXT        NOT NULL UNIQUE,
-  published_at TIMESTAMPTZ NOT NULL,
-  category     TEXT        NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                TEXT        PRIMARY KEY,
+  title             TEXT        NOT NULL,
+  source            TEXT        NOT NULL,
+  url               TEXT        NOT NULL UNIQUE,
+  published_at      TIMESTAMPTZ NOT NULL,
+  category          TEXT        NOT NULL,
+  title_fingerprint TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at DESC);
-CREATE INDEX IF NOT EXISTS idx_articles_category     ON articles (category);
-CREATE INDEX IF NOT EXISTS idx_articles_source       ON articles (source);
+CREATE INDEX IF NOT EXISTS idx_articles_published_at      ON articles (published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_articles_category          ON articles (category);
+CREATE INDEX IF NOT EXISTS idx_articles_source            ON articles (source);
+CREATE INDEX IF NOT EXISTS idx_articles_title_fingerprint ON articles (title_fingerprint);
 
 -- ── Events ────────────────────────────────────────────────────────────────────
 -- Structured intelligence events extracted from articles.

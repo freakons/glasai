@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbQuery, tableExists } from '@/db/client';
+import { dbQuery, tableExists, getDbQueryTimeoutMs } from '@/db/client';
+import { TimeoutError }                              from '@/lib/withTimeout';
+import { createRequestId }                           from '@/lib/requestId';
 
 export const runtime = 'nodejs';
 
@@ -7,7 +9,8 @@ export const runtime = 'nodejs';
  * GET /api/health/db
  *
  * Requires x-admin-secret header for access.
- * Returns DB connectivity, connection path, schema status, and env presence.
+ * Returns DB connectivity, latency, timeout state, connection path, schema
+ * status, and env presence with a structured grade.
  */
 
 /** Derive the connection path type from the DATABASE_URL value. */
@@ -39,14 +42,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, status: 'unauthorized' }, { status: 401 });
   }
 
+  const requestId = req.headers.get('x-request-id') ?? createRequestId();
+  const timestamp = new Date().toISOString();
+
   // ── DB connectivity ───────────────────────────────────────────────────────
   let dbConnected = false;
   let dbError: string | undefined;
+  let dbTimedOut = false;
+  let dbLatencyMs: number | undefined;
   try {
+    const t0 = Date.now();
     const rows = await dbQuery<{ now: string }>`SELECT NOW() AS now`;
+    dbLatencyMs = Date.now() - t0;
     dbConnected = rows.length > 0;
     if (!dbConnected) dbError = 'SELECT NOW() returned no rows';
   } catch (err) {
+    dbTimedOut = err instanceof TimeoutError;
     dbError = err instanceof Error ? err.message : String(err);
   }
 
@@ -74,17 +85,33 @@ export async function GET(req: NextRequest) {
   const connectionPath   = detectConnectionPath();
   const dbProvider       = process.env.DB_PROVIDER || (connectionPath === 'neon-http' ? 'neon' : 'postgres');
   const missingOptionalEnv = OPTIONAL_ENV_VARS.filter(v => !process.env[v]);
+
+  // ── Grade ─────────────────────────────────────────────────────────────────
+  type Grade = 'healthy' | 'degraded' | 'failing';
+  let grade: Grade;
+  if (!dbConnected) {
+    grade = dbTimedOut ? 'degraded' : 'failing';
+  } else if (!allTablesPresent) {
+    grade = 'degraded';
+  } else {
+    grade = 'healthy';
+  }
+
   const ok = dbConnected;
 
   const body = {
+    status:    grade,
     ok,
-    status:    ok ? 'ok' : 'error',
-    timestamp: new Date().toISOString(),
+    timestamp,
+    requestId,
     database: {
       connected:      dbConnected,
       connectionPath,
       provider:       dbProvider,
-      ...(dbError ? { error: dbError } : {}),
+      latencyMs:      dbLatencyMs ?? null,
+      queryTimeoutMs: getDbQueryTimeoutMs(),
+      ...(dbTimedOut ? { timedOut: true } : {}),
+      ...(dbError    ? { error: dbError } : {}),
     },
     schema: {
       allTablesPresent,

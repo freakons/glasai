@@ -15,6 +15,18 @@
 import Parser from 'rss-parser';
 import type { Source } from '../../config/intelligenceSources';
 import type { Article, ArticleCategory } from '../../types/intelligence';
+import { withTimeout } from '@/lib/withTimeout';
+import {
+  canonicalizeUrl,
+  cleanText,
+  cleanPlainText,
+  normalizeSourceName,
+  normalizeTimestamp,
+  generateArticleId,
+} from '../normalization/helpers';
+
+// Per-feed fetch timeout.  Override with RSS_FEED_TIMEOUT_MS env var.
+const RSS_FEED_TIMEOUT_MS = parseInt(process.env.RSS_FEED_TIMEOUT_MS ?? '10000', 10);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result type
@@ -123,7 +135,9 @@ interface ParsedFeed {
 
 /**
  * Fetches and parses an RSS/Atom feed using rss-parser.
- * Races against a 10-second timeout to avoid hanging on slow/dead feeds.
+ * Races against RSS_FEED_TIMEOUT_MS (default 10 s) to avoid hanging on
+ * slow or dead feeds.  Uses the shared withTimeout utility so timeout
+ * errors carry structured stage/duration metadata.
  */
 async function fetchRawFeed(url: string): Promise<ParsedFeed> {
   const parser = new Parser({
@@ -136,12 +150,11 @@ async function fetchRawFeed(url: string): Promise<ParsedFeed> {
     },
   });
 
-  // Race the parse against a 10-second timeout
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('RSS feed timed out after 10s')), 10_000)
+  const feed = await withTimeout(
+    parser.parseURL(url),
+    RSS_FEED_TIMEOUT_MS,
+    'fetch:rss',
   );
-
-  const feed = await Promise.race([parser.parseURL(url), timeout]);
 
   return {
     title: feed.title ?? '',
@@ -161,44 +174,28 @@ async function fetchRawFeed(url: string): Promise<ParsedFeed> {
 
 /**
  * Maps a parsed RSS item to the canonical Article type.
+ * Applies centralized normalization to all text fields, URLs, and timestamps.
  */
 function normaliseItem(item: ParsedItem, source: Source): Article {
-  const id = generateArticleId(item.link);
+  const cleanUrl = canonicalizeUrl(item.link);
+  const id = generateArticleId(cleanUrl);
+
+  // Clean text fields: content may contain HTML, snippets are usually plain text
+  const content = cleanText(item.content) || cleanPlainText(item.contentSnippet) || cleanPlainText(item.description);
+  const excerpt = (cleanPlainText(item.contentSnippet) || cleanPlainText(item.description)).slice(0, 300) || undefined;
 
   return {
     id,
-    title: item.title.trim(),
-    source: source.name,
-    url: item.link,
-    publishedAt: parseDate(item.pubDate ?? item.isoDate),
-    content: item.content || item.contentSnippet || item.description || '',
-    excerpt: (item.contentSnippet || item.description)?.slice(0, 300),
+    title: cleanPlainText(item.title) || item.title.trim(),
+    source: normalizeSourceName(source.name),
+    url: cleanUrl,
+    publishedAt: normalizeTimestamp(item.pubDate ?? item.isoDate),
+    content,
+    excerpt,
     category: inferCategory(source),
-    authors: item.creator ? [item.creator] : undefined,
+    authors: item.creator ? [cleanPlainText(item.creator)].filter(Boolean) : undefined,
     tags: item.categories,
   };
-}
-
-/**
- * Generates a stable article ID from its URL using a simple hash.
- */
-function generateArticleId(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    hash = (hash << 5) - hash + url.charCodeAt(i);
-    hash |= 0;
-  }
-  return `art_${Math.abs(hash).toString(16).padStart(8, '0')}`;
-}
-
-/**
- * Parses a date string from the feed into an ISO 8601 string.
- * Falls back to now() if the date is missing or unparseable.
- */
-function parseDate(raw?: string): string {
-  if (!raw) return new Date().toISOString();
-  const parsed = new Date(raw);
-  return isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
 
 /**

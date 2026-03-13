@@ -7,9 +7,26 @@
  * Usage:
  *   import { dbQuery } from '@/db/client';
  *   const rows = await dbQuery<MyRow>`SELECT * FROM events LIMIT 10`;
+ *
+ *   // With per-query context for structured timeout diagnostics:
+ *   import { withDbContext } from '@/db/client';
+ *   const db = withDbContext({ operation: 'health:ping', requestId });
+ *   const rows = await db.query<MyRow>`SELECT NOW()`;
  */
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
+import { TimeoutError } from '@/lib/withTimeout';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timeout configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Default DB query timeout in milliseconds.
+ * Override per-deployment via DB_QUERY_TIMEOUT_MS environment variable.
+ * Individual queries can further override via withDbContext({ timeoutMs }).
+ */
+const DB_QUERY_TIMEOUT_MS = parseInt(process.env.DB_QUERY_TIMEOUT_MS ?? '5000', 10);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schema-safety helpers (per-process in-memory caches)
@@ -98,17 +115,71 @@ function getClient(): QueryFn | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Per-query options
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Options for DB query context binding and per-query timeout overrides.
+ * Passed to withDbContext() to create context-bound query helpers.
+ */
+export interface DbQueryOptions {
+  /**
+   * Human-readable operation label included in timeout diagnostics.
+   * Use dot-separated route:action format, e.g. 'health:ping', 'signals:fetch'.
+   */
+  operation?: string;
+  /** Request correlation ID emitted alongside timeout warnings. */
+  requestId?: string;
+  /**
+   * Per-query timeout override in milliseconds.
+   * Defaults to DB_QUERY_TIMEOUT_MS (env var, default 5000 ms).
+   */
+  timeoutMs?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Timeout helper
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Wraps a DB query promise with a hard deadline.
+ *
+ * - Resolves with the original value when the query completes in time.
+ * - Rejects with a {@link TimeoutError} when the deadline fires.
+ * - Emits a structured console.warn with operation, duration, and requestId.
+ * - The internal timer is always cleared via a finally block so the Node
+ *   event loop is not kept alive after the query settles.
+ *
+ * @param promise    The DB query promise to guard.
+ * @param timeoutMs  Deadline in milliseconds (default: DB_QUERY_TIMEOUT_MS env).
+ * @param opts       Optional operation name and requestId for diagnostics.
+ */
 export async function withDbTimeout<T>(
   promise: Promise<T>,
-  timeoutMs = 5000
+  timeoutMs: number = DB_QUERY_TIMEOUT_MS,
+  opts?: Pick<DbQueryOptions, 'operation' | 'requestId'>
 ): Promise<T> {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('db timeout')), timeoutMs)
-  );
-  return Promise.race([promise, timeout]) as Promise<T>;
+  const stage = opts?.operation ? `db:query:${opts.operation}` : 'db:query';
+  let handle: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    handle = setTimeout(() => {
+      console.warn(
+        `[db/client] DB query timeout` +
+        ` stage=${stage}` +
+        ` timeoutMs=${timeoutMs}` +
+        (opts?.requestId ? ` requestId=${opts.requestId}` : '') +
+        ` aborted=true`,
+      );
+      reject(new TimeoutError(stage, timeoutMs, opts?.requestId));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (handle !== undefined) clearTimeout(handle);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,6 +191,9 @@ export async function withDbTimeout<T>(
  *
  * In production, throws if DATABASE_URL is not configured.
  * In development, returns an empty array when DATABASE_URL is absent.
+ *
+ * On DB timeout, logs a structured warning (via withDbTimeout) and returns [].
+ * Use withDbContext() when you need per-query operation labels or requestId.
  *
  * @example
  * const events = await dbQuery<EventRow>`
@@ -149,6 +223,8 @@ export async function dbQuery<T = Record<string, unknown>>(
         _missingTableWarned.add(tableName);
         console.warn(`[db/client] Table "${tableName}" does not exist yet — returning empty result (run /api/migrate to create schema)`);
       }
+    } else if (err instanceof TimeoutError) {
+      // Already logged with structured context in withDbTimeout — no duplicate.
     } else {
       console.error('[db/client] Query error:', err);
     }
@@ -219,6 +295,9 @@ export async function tableExists(tableName: string): Promise<boolean> {
  * so callers can return a proper HTTP 503 instead of silently serving stale
  * or empty data.  Use this for critical read paths.
  *
+ * On timeout, throws a {@link TimeoutError} (a subclass of Error) so callers
+ * can distinguish a timeout from other DB failures if needed.
+ *
  * @example
  * try {
  *   const rows = await dbQueryStrict<SignalRow>`SELECT * FROM signals LIMIT 50`;
@@ -238,4 +317,94 @@ export async function dbQueryStrict<T = Record<string, unknown>>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await withDbTimeout((client as any)(strings, ...values));
   return result as T[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context-bound query factory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates context-bound query helpers with an operation label, requestId,
+ * and optional per-query timeout override.
+ *
+ * Use this when you want structured timeout diagnostics that include the
+ * route name and request correlation ID in the log output.
+ *
+ * The returned `query` and `queryStrict` behave identically to `dbQuery` and
+ * `dbQueryStrict` but pass the provided context through to `withDbTimeout`.
+ *
+ * @example
+ * const db = withDbContext({ operation: 'health:ping', requestId: reqId });
+ * const rows = await db.query<{ now: string }>`SELECT NOW() AS now`;
+ *
+ * // Per-query timeout override (e.g. for a long aggregation):
+ * const db = withDbContext({ operation: 'stats:aggregate', timeoutMs: 10000 });
+ * const rows = await db.query<CoreRow>`SELECT COUNT(*) ...`;
+ */
+export function withDbContext(opts: DbQueryOptions) {
+  const effectiveTimeoutMs = opts.timeoutMs ?? DB_QUERY_TIMEOUT_MS;
+  const timeoutOpts = { operation: opts.operation, requestId: opts.requestId };
+
+  return {
+    /**
+     * Safe variant: returns [] on error (mirrors dbQuery behaviour).
+     * Timeout and other errors are logged but not re-thrown.
+     */
+    async query<T = Record<string, unknown>>(
+      strings: TemplateStringsArray,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...values: any[]
+    ): Promise<T[]> {
+      const client = getClient();
+      if (!client) return [];
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await withDbTimeout((client as any)(strings, ...values), effectiveTimeoutMs, timeoutOpts);
+        return result as T[];
+      } catch (err) {
+        const pgCode = (err as { code?: string })?.code;
+        if (pgCode === '42P01') {
+          const msg = (err as { message?: string })?.message ?? '';
+          const tableMatch = msg.match(/relation "([^"]+)" does not exist/);
+          const tableName = tableMatch?.[1] ?? 'unknown';
+          if (!_missingTableWarned.has(tableName)) {
+            _missingTableWarned.add(tableName);
+            console.warn(`[db/client] Table "${tableName}" does not exist yet — returning empty result (run /api/migrate to create schema)`);
+          }
+        } else if (err instanceof TimeoutError) {
+          // Already logged with structured context in withDbTimeout.
+        } else {
+          console.error(`[db/client] Query error (${opts.operation ?? 'unknown'}):`, err);
+        }
+        return [];
+      }
+    },
+
+    /**
+     * Strict variant: throws on error (mirrors dbQueryStrict behaviour).
+     * On timeout, throws a {@link TimeoutError} with operation + requestId context.
+     */
+    async queryStrict<T = Record<string, unknown>>(
+      strings: TemplateStringsArray,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...values: any[]
+    ): Promise<T[]> {
+      const client = getClient();
+      if (!client) {
+        throw new Error('[db/client] DATABASE_URL is not configured — cannot execute query.');
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await withDbTimeout((client as any)(strings, ...values), effectiveTimeoutMs, timeoutOpts);
+      return result as T[];
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Default timeout accessor (for diagnostics / health reporting)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Returns the effective default DB query timeout (from DB_QUERY_TIMEOUT_MS env, or 5000 ms). */
+export function getDbQueryTimeoutMs(): number {
+  return DB_QUERY_TIMEOUT_MS;
 }

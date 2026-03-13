@@ -20,17 +20,28 @@ export default async function RegulationPage() {
       <PageHeader
         title="Regulation &"
         highlight="Policy"
-        subtitle={`${regulations.length} regulatory actions · EU · US · China · India — updated March 2026`}
+        subtitle={regulations.length > 0 ? `${regulations.length} regulatory actions tracked` : 'Tracking global AI regulation'}
         gradient="var(--rose-l), var(--amber-l)"
       />
 
       <RegulationFilters />
 
-      <div className="gov-grid">
-        {regulations.map((reg) => (
-          <RegulationCard key={reg.id} regulation={reg} />
-        ))}
-      </div>
+      {regulations.length === 0 ? (
+        <div className="empty-state" style={{ textAlign: 'center', padding: '64px 24px' }}>
+          <p style={{ fontFamily: 'var(--fs)', fontStyle: 'italic', fontSize: 18, color: 'var(--text2)', marginBottom: 8 }}>
+            No regulatory data yet
+          </p>
+          <p style={{ fontFamily: 'var(--fm)', fontSize: 11, color: 'var(--text3)', letterSpacing: '0.04em' }}>
+            Regulation intelligence will appear here once the pipeline ingests data.
+          </p>
+        </div>
+      ) : (
+        <div className="gov-grid">
+          {regulations.map((reg) => (
+            <RegulationCard key={reg.id} regulation={reg} />
+          ))}
+        </div>
+      )}
     </>
   );
 }

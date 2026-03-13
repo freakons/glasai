@@ -15,6 +15,7 @@
 
 import type { Article, ArticleCategory, NormalizedCategory } from '../../types/intelligence';
 import { detectEntities } from './entityDetector';
+import { canonicalizeUrl, cleanText, normalizeSourceName, normalizeTimestamp } from './helpers';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Category mapping
@@ -44,60 +45,6 @@ function normalizeCategory(raw: ArticleCategory): NormalizedCategory {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Text cleaning
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Collapses multiple consecutive whitespace characters (spaces, tabs, newlines)
- * into a single space and trims leading/trailing whitespace.
- */
-function cleanWhitespace(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Strips common UTM and analytics tracking parameters from a URL.
- * Preserves all other query parameters and the URL structure.
- *
- * Removed params: utm_source, utm_medium, utm_campaign, utm_term,
- *                 utm_content, ref, source, fbclid, gclid, msclkid
- */
-const TRACKING_PARAMS = new Set([
-  'utm_source',
-  'utm_medium',
-  'utm_campaign',
-  'utm_term',
-  'utm_content',
-  'ref',
-  'source',
-  'fbclid',
-  'gclid',
-  'msclkid',
-]);
-
-function stripTrackingParams(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const keysToDelete: string[] = [];
-
-    parsed.searchParams.forEach((_, key) => {
-      if (TRACKING_PARAMS.has(key.toLowerCase())) {
-        keysToDelete.push(key);
-      }
-    });
-
-    for (const key of keysToDelete) {
-      parsed.searchParams.delete(key);
-    }
-
-    return parsed.toString();
-  } catch {
-    // Return original if URL is malformed
-    return url;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Core normalizer
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -124,10 +71,12 @@ function stripTrackingParams(url: string): string {
  */
 export function normalizeArticle(article: Article): Article {
   // ── 1. Clean text fields ──────────────────────────────────────────────────
-  const cleanTitle   = cleanWhitespace(article.title);
-  const cleanContent = cleanWhitespace(article.content);
-  const cleanUrl     = stripTrackingParams(article.url);
-  const cleanExcerpt = article.excerpt ? cleanWhitespace(article.excerpt) : article.excerpt;
+  const cleanTitle   = cleanText(article.title);
+  const cleanContent = cleanText(article.content);
+  const cleanUrl     = canonicalizeUrl(article.url);
+  const cleanExcerpt = article.excerpt ? cleanText(article.excerpt) : article.excerpt;
+  const cleanSource  = normalizeSourceName(article.source);
+  const cleanPublishedAt = normalizeTimestamp(article.publishedAt);
 
   // ── 2. Normalize category ─────────────────────────────────────────────────
   const normalizedCategory = normalizeCategory(article.category);
@@ -151,6 +100,8 @@ export function normalizeArticle(article: Article): Article {
     content:             cleanContent,
     url:                 cleanUrl,
     excerpt:             cleanExcerpt,
+    source:              cleanSource,
+    publishedAt:         cleanPublishedAt,
     normalizedCategory,
     detectedCompanies:   detectedCompanies.length > 0 ? detectedCompanies : undefined,
     detectedModels:      detectedModels.length > 0 ? detectedModels : undefined,

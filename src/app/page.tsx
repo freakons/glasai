@@ -8,12 +8,12 @@ import { TrendRadar } from '@/components/TrendRadar';
 export const revalidate = 3600;
 
 export default async function HomePage() {
-  // Compute live stats; gracefully fall back to siteConfig hardcoded values on any error
+  // Compute live stats from DB — show real numbers only, never hardcoded fallbacks
   const fallbackStats = { signals: 0, companies: 0, regulations: 0, sources: 0, fundingRounds: 0, models: 0, totalFundingUsdM: 0 };
   const live = await getSiteStats().catch(() => fallbackStats);
-  const signals     = live.signals     > 0 ? live.signals     : siteConfig.stats.signals;
-  const companies   = live.companies   > 0 ? live.companies   : siteConfig.stats.companies;
-  const regulations = live.regulations > 0 ? live.regulations : siteConfig.stats.regulations;
+  const signals     = live.signals;
+  const companies   = live.companies;
+  const regulations = live.regulations;
 
   return (
     <>
@@ -35,11 +35,12 @@ export default async function HomePage() {
           </Link>
         </div>
         <div className="hero-metrics">
-          <div className="hm"><div className="hm-n">{signals}</div><div className="hm-l">Signals this week</div></div>
-          <div className="hm"><div className="hm-n">{companies}</div><div className="hm-l">Companies tracked</div></div>
-          <div className="hm"><div className="hm-n">{regulations}</div><div className="hm-l">Active regulations</div></div>
-          <div className="hm"><div className="hm-n">{siteConfig.stats.markets}</div><div className="hm-l">Global markets</div></div>
-          <div className="hm"><div className="hm-n">2.4K</div><div className="hm-l">Professionals tracking AI</div></div>
+          {signals > 0 && <div className="hm"><div className="hm-n">{signals}</div><div className="hm-l">Signals tracked</div></div>}
+          {companies > 0 && <div className="hm"><div className="hm-n">{companies}</div><div className="hm-l">Companies tracked</div></div>}
+          {regulations > 0 && <div className="hm"><div className="hm-n">{regulations}</div><div className="hm-l">Active regulations</div></div>}
+          {signals === 0 && companies === 0 && regulations === 0 && (
+            <div className="hm"><div className="hm-n">Live</div><div className="hm-l">Intelligence platform</div></div>
+          )}
         </div>
       </div>
 

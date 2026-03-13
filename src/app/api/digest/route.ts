@@ -6,7 +6,9 @@ export const runtime = 'nodejs';
 const RESEND_API = 'https://api.resend.com';
 
 export async function GET(req: NextRequest) {
-  const cronSecret = req.headers.get('x-vercel-cron-secret') || '';
+  // Vercel cron sends Authorization: Bearer <CRON_SECRET>
+  const authHeader = req.headers.get('authorization') || '';
+  const cronSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   const querySecret = new URL(req.url).searchParams.get('secret') || '';
   const expected = process.env.CRON_SECRET || '';
 

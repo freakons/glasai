@@ -1,11 +1,27 @@
 /**
  * Omterminal — Signal Ranking Engine
  *
- * Combines intelligence_score, trust_score, source reliability, entity weight,
- * and velocity into a single normalized importance score (0–100).
+ * v3: Refactored to eliminate double-counting between confidence, trust, and
+ * intelligence scores.  Now computes importance as a cleaner composite of
+ * orthogonal components:
+ *
+ *   intelligence_score  0.30  — quality of extraction / analysis
+ *   source_trust        0.25  — from centralized sourceTrust model (type + reliability)
+ *   velocity_score      0.25  — entity appearance rate in recent data
+ *   entity_weight       0.20  — breadth of entity coverage (rescaled to 0–100)
+ *
+ * Changes from v2:
+ *   • Removed trust_score from the formula — it was 70% confidence (already
+ *     captured in intelligence_score) + 30% source trust (now standalone).
+ *   • Entity weight rescaled from 0–25 → 0–100 for consistent component ranges.
+ *   • Source trust weight increased from 0.15 → 0.25 to properly reward
+ *     signals backed by credible sources.
+ *   • Velocity weight increased from 0.20 → 0.25 (now that trust_score's
+ *     0.20 weight is freed).
+ *   • Entity weight increased from 0.10 → 0.20 to reflect ecosystem breadth.
  */
 
-import { getSourceById } from '@/config/intelligenceSources';
+import { computeSourceTrust } from '@/lib/sourceTrust';
 import { dbQuery } from '@/db/client';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,7 +33,7 @@ export interface RankedSignal {
   intelligence_score: number;
   /** Trust/confidence score derived from source verification (0–100) */
   trust_score: number;
-  /** Source identifier — looked up in intelligenceSources registry */
+  /** Source identifier — looked up via sourceTrust model */
   source: string;
   /** Number of distinct entities associated with this signal */
   entity_count: number;
@@ -32,6 +48,23 @@ export interface RankingResult {
   importance_score: number;
   /** Velocity score (0–100) reflecting how quickly entities are appearing in the dataset */
   velocity_score: number;
+  /** Source trust score (0–100) used in the importance computation */
+  source_trust_score: number;
+  /** Per-component breakdown for debugging and inspectability */
+  breakdown: ImportanceBreakdown;
+}
+
+export interface ImportanceBreakdown {
+  intelligence: number;
+  sourceTrust: number;
+  velocity: number;
+  entityWeight: number;
+  weights: {
+    intelligence: number;
+    sourceTrust: number;
+    velocity: number;
+    entityWeight: number;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +73,17 @@ export interface RankingResult {
 
 /** Raw velocity value that maps to 100 on the normalized scale */
 const VELOCITY_SATURATION = 100;
+
+/** Entity count that maps to 100 on the entity weight scale */
+const ENTITY_SATURATION = 5;
+
+/** Component weights — must sum to 1.0 */
+const IMPORTANCE_WEIGHTS = {
+  intelligence: 0.30,
+  sourceTrust:  0.25,
+  velocity:     0.25,
+  entityWeight: 0.20,
+} as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Velocity helper
@@ -87,35 +131,39 @@ async function computeVelocityFromDB(entities: string[]): Promise<number> {
  * Compute a unified importance score for a single signal.
  *
  * @param signal - The signal to score.
- * @returns      { importance_score, velocity_score } both clamped to 0–100.
+ * @returns      { importance_score, velocity_score, source_trust_score, breakdown }
+ *               all scores clamped to 0–100.
  */
 export async function computeSignalImportance(
   signal: RankedSignal,
 ): Promise<RankingResult> {
 
-  // 1. Source reliability — normalised to 0–100
-  //    intelligenceSources reliabilityScore is 1–10; scale to 0–100.
-  //    Unknown sources default to 50 (mid-range).
-  const sourceEntry = getSourceById(signal.source);
-  const source_reliability = sourceEntry?.reliabilityScore != null
-    ? (sourceEntry.reliabilityScore / 10) * 100
-    : 50;
+  // 1. Source trust — from the centralized sourceTrust model (0–100).
+  const sourceTrustResult = computeSourceTrust(signal.source);
+  const source_trust_score = sourceTrustResult.trustScore;
 
-  // 2. Entity weight — spec: min(entity_count, 5) * 5  →  range 0–25
-  const entity_weight = Math.min(signal.entity_count, 5) * 5;
+  // 2. Entity weight — normalized to 0–100 (saturates at ENTITY_SATURATION).
+  const entityWeight = Math.min(signal.entity_count / ENTITY_SATURATION, 1) * 100;
 
-  // 3. Velocity score — derived from database history across all signals
+  // 3. Velocity score — derived from database history across all signals.
   const velocity_score = await computeVelocityFromDB(signal.entities ?? []);
 
-  // 4. Composite importance score
+  // 4. Composite importance score — orthogonal components only.
   const raw_importance =
-    signal.intelligence_score * 0.35 +
-    signal.trust_score        * 0.20 +
-    source_reliability        * 0.15 +
-    entity_weight             * 0.10 +
-    velocity_score            * 0.20;
+    signal.intelligence_score * IMPORTANCE_WEIGHTS.intelligence +
+    source_trust_score        * IMPORTANCE_WEIGHTS.sourceTrust +
+    velocity_score            * IMPORTANCE_WEIGHTS.velocity +
+    entityWeight              * IMPORTANCE_WEIGHTS.entityWeight;
 
-  const importance_score = Math.min(Math.max(raw_importance, 0), 100);
+  const importance_score = Math.round(Math.min(Math.max(raw_importance, 0), 100));
 
-  return { importance_score, velocity_score };
+  const breakdown: ImportanceBreakdown = {
+    intelligence: signal.intelligence_score,
+    sourceTrust: source_trust_score,
+    velocity: velocity_score,
+    entityWeight: Math.round(entityWeight),
+    weights: IMPORTANCE_WEIGHTS,
+  };
+
+  return { importance_score, velocity_score, source_trust_score, breakdown };
 }

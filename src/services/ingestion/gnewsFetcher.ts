@@ -20,11 +20,27 @@
  *   is populated for the intelligence/snapshot read paths.
  */
 
-import { classifyArticle, type IntelligenceCategory } from '../intelligence/classifier';
+import { classifyArticle } from '../intelligence/classifier';
 import { dbQuery as query } from '../../db/client';
 import { saveEvent } from '../storage/eventStore';
 import { saveArticle } from '../storage/articleStore';
-import type { Event, EventType } from '@/types/intelligence';
+import type { Event } from '@/types/intelligence';
+import { createAbortTimeout, TimeoutError } from '@/lib/withTimeout';
+import {
+  canonicalizeUrl,
+  cleanText,
+  normalizeSourceName,
+  normalizeTimestamp,
+  generateArticleId,
+  generateStableEventId,
+  generateTitleFingerprint,
+  categoryToEventType,
+  categoryToDbCategory,
+} from '../normalization/helpers';
+import { detectAndLinkEntities } from '@/lib/entityResolver';
+
+// Per-query fetch timeout.  Override with GNEWS_FETCH_TIMEOUT_MS env var.
+const GNEWS_FETCH_TIMEOUT_MS = parseInt(process.env.GNEWS_FETCH_TIMEOUT_MS ?? '15000', 10);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GNews API types
@@ -69,63 +85,7 @@ function getMaxQueries(): number {
   return Math.max(1, Math.min(isNaN(env) ? 3 : env, ALL_QUERIES.length));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ID / category helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function urlHash(url: string): string {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    hash = (hash << 5) - hash + url.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(16).padStart(8, '0');
-}
-
-/** Stable event ID for GNews-derived events: gnews_<urlhash16> */
-function urlToEventId(url: string): string {
-  return `gnews_${urlHash(url)}`;
-}
-
-/** Stable article ID matching the articleStore convention: art_<urlhash16> */
-function urlToArticleId(url: string): string {
-  return `art_${urlHash(url)}`;
-}
-
-/** Map IntelligenceCategory → canonical EventType */
-function categoryToEventType(category: IntelligenceCategory): EventType {
-  switch (category) {
-    case 'MODEL_RELEASE': return 'model_release';
-    case 'FUNDING':       return 'funding';
-    case 'REGULATION':    return 'regulation';
-    case 'POLICY':        return 'policy';
-    case 'RESEARCH':      return 'research_breakthrough';
-    case 'COMPANY_MOVE':  return 'company_strategy';
-    default:              return 'other';
-  }
-}
-
-/**
- * Map IntelligenceCategory → DB-friendly category matching frontend ArticleCat.
- */
-function categoryToDbCategory(category: IntelligenceCategory): string {
-  switch (category) {
-    case 'MODEL_RELEASE': return 'models';
-    case 'FUNDING':       return 'funding';
-    case 'REGULATION':    return 'regulation';
-    case 'POLICY':        return 'regulation';
-    case 'RESEARCH':      return 'research';
-    case 'COMPANY_MOVE':  return 'product';
-    default:              return 'research';
-  }
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs = 15000): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('fetch timeout')), timeoutMs)
-  );
-  return Promise.race([promise, timeout]) as Promise<T>;
-}
+// ID / category helpers are now imported from normalization/helpers.ts
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result type
@@ -172,11 +132,20 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
         `&lang=en&sortby=publishedAt&max=10&apikey=${key}`;
 
       let res: Response;
+      const { controller, clear } = createAbortTimeout(GNEWS_FETCH_TIMEOUT_MS, 'fetch:gnews');
       try {
-        res = await withTimeout(fetch(url));
-      } catch {
-        console.warn(`[ingest:gnews] Timeout on query "${q}"`);
+        res = await fetch(url, { signal: controller.signal });
+      } catch (fetchErr) {
+        if (fetchErr instanceof TimeoutError || controller.signal.aborted) {
+          console.warn(
+            `[ingest:gnews] Timeout on query "${q}" after ${GNEWS_FETCH_TIMEOUT_MS}ms`
+          );
+        } else {
+          console.warn(`[ingest:gnews] Fetch error on query "${q}":`, fetchErr);
+        }
         return { q, articles: [] as GNewsArticle[], error: 'timeout' as const };
+      } finally {
+        clear();
       }
 
       // Explicit 429 detection — never swallow quota exhaustion silently
@@ -224,13 +193,25 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
 
     for (const article of articles) {
       total++;
-      const category = classifyArticle(
-        article.title + ' ' + (article.description || '')
-      );
+
+      // ── Normalize fields before classification and storage ──────────────
+      const cleanTitle       = cleanText(article.title);
+      const cleanDescription = cleanText(article.description);
+      const cleanUrl         = canonicalizeUrl(article.url);
+      const sourceName       = normalizeSourceName(article.source.name);
+      const publishedAt      = normalizeTimestamp(article.publishedAt);
+
+      if (!cleanTitle || !cleanUrl) {
+        skipped++;
+        continue;
+      }
+
+      const category = classifyArticle(cleanTitle + ' ' + cleanDescription);
       const eventType = categoryToEventType(category);
       const dbCategory = categoryToDbCategory(category);
-      const articleId = urlToArticleId(article.url);
-      const eventId = urlToEventId(article.url);
+      const articleId = generateArticleId(cleanUrl);
+      const eventId = generateStableEventId(cleanUrl);
+      const titleFingerprint = generateTitleFingerprint(cleanTitle);
 
       // Step 1: Write to articles table first.
       // This must succeed before the event insert to satisfy the FK constraint:
@@ -240,32 +221,43 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
       try {
         await saveArticle({
           id: articleId,
-          title: article.title,
-          source: article.source.name,
-          url: article.url,
-          publishedAt: article.publishedAt,
+          title: cleanTitle,
+          source: sourceName,
+          url: cleanUrl,
+          publishedAt,
           category: dbCategory,
+          titleFingerprint,
         });
       } catch (err) {
-        console.error(`[ingest:gnews] Article save failed for "${article.url}":`, err);
+        console.error(`[ingest:gnews] Article save failed for "${cleanUrl}":`, err);
         skipped++;
         continue;
       }
 
-      // Step 2: Write event with valid source_article_id reference
+      // Step 2: Write event with valid source_article_id reference.
+      // Use entity detection to assign correct company instead of sourceName.
+      const detected = detectAndLinkEntities(cleanTitle, cleanDescription);
+      const primaryCompany = detected.companies[0] ?? sourceName;
+      const entityTags = [
+        ...detected.companies,
+        ...detected.models,
+        ...detected.investors,
+      ];
+
       const event: Event = {
         id: eventId,
         type: eventType,
-        company: article.source.name,
-        title: article.title,
-        description: article.description || '',
-        timestamp: article.publishedAt,
-        tags: [q],
+        company: primaryCompany,
+        relatedModel: detected.models[0],
+        title: cleanTitle,
+        description: cleanDescription,
+        timestamp: publishedAt,
+        tags: Array.from(new Set([q, ...entityTags])),
         sourceArticle: {
           id: articleId,
-          title: article.title,
-          url: article.url,
-          source: article.source.name,
+          title: cleanTitle,
+          url: cleanUrl,
+          source: sourceName,
         },
       };
 
@@ -288,12 +280,12 @@ export async function ingestGNews(): Promise<GNewsIngestResult> {
             title, summary, source_url, source_name,
             category, published_at
           ) VALUES (
-            ${article.title},
-            ${article.description || ''},
-            ${article.url},
-            ${article.source.name},
+            ${cleanTitle},
+            ${cleanDescription},
+            ${cleanUrl},
+            ${sourceName},
             ${category},
-            ${article.publishedAt}
+            ${publishedAt}
           )
           ON CONFLICT (source_url) DO NOTHING
         `;

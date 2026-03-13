@@ -1,9 +1,14 @@
 /**
- * /admin/system — Deployment diagnostics
+ * /admin/system — Deployment diagnostics (protected)
  *
  * Server-rendered page that probes /api/health/db and /api/opportunities at
  * request time so developers can inspect the live deployment state without
  * needing direct database or log access.
+ *
+ * Auth:
+ *   - Requires ?key=<ADMIN_SECRET> query parameter.
+ *   - In production, missing ADMIN_SECRET fails closed (page inaccessible).
+ *   - In development with no ADMIN_SECRET, accessible without key for ergonomics.
  *
  * Both fetches use { cache: 'no-store' } so every page load reflects the
  * current state of the deployment.
@@ -116,7 +121,48 @@ function SourceChip({ source }: { source: 'db' | 'mock' | 'db-empty' }) {
 
 export const metadata = { title: 'System Diagnostics | OM Terminal' };
 
-export default async function SystemPage() {
+// Force dynamic rendering — auth depends on the request URL.
+export const dynamic = 'force-dynamic';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isAdminAuthorized(searchParams: Record<string, string | string[] | undefined>): boolean {
+  const adminSecret = process.env.ADMIN_SECRET ?? '';
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // Production with no ADMIN_SECRET: fail closed — page is inaccessible.
+  if (isProd && !adminSecret) return false;
+
+  // Development with no secret configured: allow for ergonomics.
+  if (!adminSecret) return true;
+
+  const key = typeof searchParams.key === 'string' ? searchParams.key : '';
+  return key === adminSecret;
+}
+
+function AccessDenied() {
+  return (
+    <div className="mx-auto max-w-md px-4 py-20 text-center">
+      <h1 className="font-serif text-2xl italic text-zinc-100 mb-4">Access Denied</h1>
+      <p className="text-sm font-mono text-zinc-500">
+        This page requires admin authentication.
+      </p>
+    </div>
+  );
+}
+
+export default async function SystemPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  if (!isAdminAuthorized(params)) {
+    return <AccessDenied />;
+  }
+
   const base         = await getBaseUrl();
   const [db, opps]   = await Promise.all([
     fetchDbHealth(base),

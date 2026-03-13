@@ -2,16 +2,16 @@
   "framework": "nextjs",
   "crons": [
     {
-      "path": "/api/digest",
-      "schedule": "0 9 * * 5"
-    },
-    {
       "path": "/api/pipeline/run",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/intelligence/run",
-      "schedule": "10 */2 * * *"
+      "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/digest",
+      "schedule": "0 9 * * 5"
     }
   ]
 }

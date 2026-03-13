@@ -28,6 +28,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateEnvironment } from '@/lib/env';
 import { getOrCreateRequestId, logWithRequestId } from '@/lib/requestId';
+import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { getCache, setCache } from '@/lib/memoryCache';
 import { getEdgeSignals, setEdgeSignals } from '@/lib/edgeCache';
 import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
@@ -36,6 +37,7 @@ import { generateSignalsFromEvents } from '@/services/signals/signalEngine';
 import { saveSignals, getRecentSignals } from '@/services/storage/signalStore';
 import { getSignals } from '@/db/queries';
 import { parseSignalMode, DEFAULT_SIGNAL_MODE } from '@/lib/signals/signalModes';
+import { attachSignalExplanations } from '@/lib/signals/explanationLayer';
 
 export const maxDuration = 10; // Vercel Hobby plan limit; upgrade to Pro for larger event lookbacks
 
@@ -56,7 +58,8 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const cronSecret  = req.headers.get('x-vercel-cron-secret') || '';
+  const authHeader  = req.headers.get('authorization') || '';
+  const cronSecret  = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   const querySecret = searchParams.get('secret') || '';
   const expected    = process.env.CRON_SECRET || '';
   const listOnly    = searchParams.get('list') === 'true';
@@ -126,7 +129,8 @@ export async function GET(req: NextRequest) {
       }
 
       if (dbSignals.length > 0) {
-        const payload: Record<string, unknown> = { ok: true, source: 'db', mode, signals: dbSignals, count: dbSignals.length, requestId: reqId };
+        const enrichedSignals = attachSignalExplanations(dbSignals);
+        const payload: Record<string, unknown> = { ok: true, source: 'db', mode, signals: enrichedSignals, count: enrichedSignals.length, requestId: reqId };
         if (debug && diagnostics) payload.diagnostics = diagnostics;
         // Only populate edge cache for the default mode (avoids edge cache thrash across modes).
         if (mode === DEFAULT_SIGNAL_MODE) await setEdgeSignals(payload);
@@ -186,20 +190,23 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // ── Engine mode: run signals generation ───────────────────────────────────
+  // ── Engine mode: run signals generation (lock-protected) ─────────────────
   // Parse mode for the engine run; defaults to standard to preserve existing behaviour.
   const engineMode = parseSignalMode(new URL(req.url).searchParams.get('mode'));
 
   try {
-    // 1. Fetch recent events (look back over 30 days to catch all windows)
-    const events = await getRecentEvents(500);
+    const guard = await withPipelineLock('signals-engine', reqId, 'signals', async () => {
+      const events = await getRecentEvents(500);
+      const signals = generateSignalsFromEvents(events, engineMode);
+      const inserted = await saveSignals(signals);
+      return { events, signals, inserted };
+    });
 
-    // 2. Run signals engine with mode-aware generation thresholds
-    const signals = generateSignalsFromEvents(events, engineMode);
+    if (guard.locked) {
+      return pipelineLockedResponse(reqId, guard);
+    }
 
-    // 3. Persist new signals (idempotent via ON CONFLICT DO NOTHING)
-    const inserted = await saveSignals(signals);
-
+    const { events, signals, inserted } = guard.result;
     logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
 
     return NextResponse.json(

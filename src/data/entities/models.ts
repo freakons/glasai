@@ -74,8 +74,18 @@ export const MODELS: ModelEntity[] = [
     type: 'reasoning',
     releaseYear: 2024,
     isOpenWeights: false,
-    aliases: ['o1-preview', 'o1-mini', 'OpenAI o3'],
+    aliases: ['o1-preview', 'o1-mini'],
     description: 'OpenAI\'s chain-of-thought reasoning model series.',
+  },
+  {
+    id: 'o3',
+    name: 'OpenAI o3',
+    company: 'openai',
+    type: 'reasoning',
+    releaseYear: 2025,
+    isOpenWeights: false,
+    aliases: ['o3-mini', 'o3-mini-high'],
+    description: 'OpenAI\'s advanced reasoning model, successor to o1.',
   },
   {
     id: 'claude3_5_sonnet',
@@ -84,7 +94,7 @@ export const MODELS: ModelEntity[] = [
     type: 'large_language_model',
     releaseYear: 2024,
     isOpenWeights: false,
-    aliases: ['Claude 3.5', 'claude-3-5-sonnet'],
+    aliases: ['Claude 3.5', 'claude-3-5-sonnet', 'Claude Sonnet 3.5', 'Claude 3.5 Sonnet v2'],
     description: 'Anthropic\'s balanced model combining speed and capability.',
   },
   {
@@ -94,8 +104,18 @@ export const MODELS: ModelEntity[] = [
     type: 'large_language_model',
     releaseYear: 2024,
     isOpenWeights: false,
-    aliases: ['Claude Opus', 'claude-3-opus'],
+    aliases: ['Claude Opus', 'claude-3-opus', 'Claude 3 Opus'],
     description: 'Anthropic\'s most capable model in the Claude 3 family.',
+  },
+  {
+    id: 'claude_4',
+    name: 'Claude 4',
+    company: 'anthropic',
+    type: 'large_language_model',
+    releaseYear: 2025,
+    isOpenWeights: false,
+    aliases: ['Claude 4 Sonnet', 'Claude 4 Opus', 'Claude Sonnet 4', 'Claude Opus 4'],
+    description: 'Anthropic\'s fourth-generation Claude model family.',
   },
   {
     id: 'gemini_15_pro',
@@ -187,6 +207,76 @@ export const MODELS: ModelEntity[] = [
     aliases: ['SD3', 'SD 3'],
     description: 'Stability AI\'s third-generation text-to-image model with improved text rendering.',
   },
+  {
+    id: 'gemini_2',
+    name: 'Gemini 2.0',
+    company: 'google_deepmind',
+    type: 'multimodal',
+    releaseYear: 2025,
+    isOpenWeights: false,
+    aliases: ['Gemini 2', 'Gemini 2.0 Flash', 'Gemini 2.0 Pro'],
+    description: 'Google DeepMind\'s second-generation Gemini model family.',
+  },
+  {
+    id: 'llama3_1',
+    name: 'Llama 3.1',
+    company: 'meta_ai',
+    type: 'large_language_model',
+    releaseYear: 2024,
+    isOpenWeights: true,
+    aliases: ['LLaMA 3.1', 'Meta Llama 3.1', 'llama-3.1', 'Llama 3.1 405B'],
+    description: 'Meta\'s largest open-weights model with 405B parameters.',
+  },
+  {
+    id: 'llama4',
+    name: 'Llama 4',
+    company: 'meta_ai',
+    type: 'large_language_model',
+    releaseYear: 2025,
+    isOpenWeights: true,
+    aliases: ['LLaMA 4', 'Meta Llama 4', 'llama-4', 'Llama 4 Scout', 'Llama 4 Maverick'],
+    description: 'Meta\'s fourth-generation open-weights LLM family.',
+  },
+  {
+    id: 'deepseek_v3',
+    name: 'DeepSeek-V3',
+    company: 'deepseek',
+    type: 'large_language_model',
+    releaseYear: 2024,
+    isOpenWeights: true,
+    aliases: ['DeepSeek V3', 'DeepSeek-V3', 'deepseek-v3'],
+    description: 'DeepSeek\'s competitive open-weights model with MoE architecture.',
+  },
+  {
+    id: 'deepseek_r1',
+    name: 'DeepSeek-R1',
+    company: 'deepseek',
+    type: 'reasoning',
+    releaseYear: 2025,
+    isOpenWeights: true,
+    aliases: ['DeepSeek R1', 'DeepSeek-R1', 'deepseek-r1'],
+    description: 'DeepSeek\'s reasoning model with chain-of-thought capabilities.',
+  },
+  {
+    id: 'gpt5',
+    name: 'GPT-5',
+    company: 'openai',
+    type: 'large_language_model',
+    releaseYear: 2025,
+    isOpenWeights: false,
+    aliases: ['GPT5', 'gpt-5'],
+    description: 'OpenAI\'s next-generation flagship language model.',
+  },
+  {
+    id: 'sora',
+    name: 'Sora',
+    company: 'openai',
+    type: 'video_generation',
+    releaseYear: 2024,
+    isOpenWeights: false,
+    aliases: ['OpenAI Sora'],
+    description: 'OpenAI\'s text-to-video generation model.',
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,15 +291,28 @@ export function getModelById(id: string): ModelEntity | undefined {
 /**
  * Resolve a free-text model name to the canonical ModelEntity by matching
  * against id, name, and known aliases.
+ *
+ * Uses normalized comparison to handle punctuation/casing variants:
+ *   "gpt-4o" → GPT-4o, "Claude 3.5" → Claude 3.5 Sonnet, etc.
  */
 export function resolveModel(nameOrAlias: string): ModelEntity | undefined {
-  const normalised = nameOrAlias.toLowerCase().trim();
+  const normalised = normalizeForMatch(nameOrAlias);
   return MODELS.find(
     (m) =>
       m.id === normalised ||
-      m.name.toLowerCase() === normalised ||
-      m.aliases?.some((a) => a.toLowerCase() === normalised)
+      normalizeForMatch(m.name) === normalised ||
+      m.aliases?.some((a) => normalizeForMatch(a) === normalised)
   );
+}
+
+/** Normalize a name for matching: lowercase, strip punctuation, collapse spaces. */
+function normalizeForMatch(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[-_.,:;'"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Returns all models for a given company id */

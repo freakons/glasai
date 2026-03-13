@@ -206,15 +206,27 @@ export function getInvestorById(id: string): InvestorEntity | undefined {
 /**
  * Resolve a free-text investor name to the canonical InvestorEntity by
  * matching against id, name, and known aliases.
+ *
+ * Uses normalized comparison to handle punctuation/casing variants.
  */
 export function resolveInvestor(nameOrAlias: string): InvestorEntity | undefined {
-  const normalised = nameOrAlias.toLowerCase().trim();
+  const normalised = normalizeForMatch(nameOrAlias);
   return INVESTORS.find(
     (i) =>
       i.id === normalised ||
-      i.name.toLowerCase() === normalised ||
-      i.aliases?.some((a) => a.toLowerCase() === normalised)
+      normalizeForMatch(i.name) === normalised ||
+      i.aliases?.some((a) => normalizeForMatch(a) === normalised)
   );
+}
+
+/** Normalize a name for matching: lowercase, strip punctuation, collapse spaces. */
+function normalizeForMatch(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[-_.,:;'"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /** Returns all investors flagged as AI specialists */

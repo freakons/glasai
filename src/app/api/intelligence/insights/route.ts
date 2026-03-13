@@ -12,6 +12,10 @@ interface InsightRow {
   created_at: string | null;
 }
 
+// Ranking model: Insights are a separate data type from signals, stored in
+// their own table with their own confidence metric.  They intentionally use
+// confidence-based ordering rather than signal significance_score because
+// insights represent synthesized analysis, not raw intelligence events.
 export async function GET() {
   console.log('[api] API request: insights');
 

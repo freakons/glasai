@@ -18,6 +18,7 @@ import type { GraphData, GraphNode, GraphLink } from '@/data/mockGraph';
 import type { EntityProfile } from '@/data/mockEntities';
 import type { AiEvent } from '@/data/mockEvents';
 import type { Signal } from '@/data/mockSignals';
+import { computeAllRelationships, type EntityRelationship } from '@/lib/relationshipIntelligence';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Input shape
@@ -130,4 +131,77 @@ export function buildGraphFromEntities(entities: EntityProfile[]): GraphData {
   }
 
   return { nodes, links };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signal-driven graph builder (relationship intelligence)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface IntelligentGraphInput {
+  entities: EntityProfile[];
+  events: AiEvent[];
+  signals: Signal[];
+  /** Reference date for recency calculations (default: now). */
+  referenceDate?: Date;
+  /** Minimum relationship strength to include an entity↔entity edge (default: 1). */
+  minStrength?: number;
+}
+
+export interface IntelligentGraphResult {
+  graph: GraphData;
+  /** All computed entity relationships, sorted by strength descending. */
+  relationships: EntityRelationship[];
+}
+
+/**
+ * Build a graph where entity↔entity edges are weighted by signal-driven
+ * relationship intelligence rather than static sector groupings.
+ *
+ * Includes all standard entity→event, event→signal, and signal→entity links
+ * from buildGraphData, plus weighted entity↔entity edges computed from shared
+ * signal activity, recency, and significance.
+ */
+export function buildIntelligentGraph(input: IntelligentGraphInput): IntelligentGraphResult {
+  const { entities, events, signals, referenceDate, minStrength = 1 } = input;
+
+  // Start with the standard graph
+  const base = buildGraphData({ entities, events, signals });
+
+  // Compute signal-driven relationships
+  const relationships = computeAllRelationships({
+    entities,
+    signals,
+    events,
+    referenceDate,
+  });
+
+  // Add weighted entity↔entity edges
+  const existingLinks = new Set(
+    base.links.map(l => `${l.source}::${l.target}`),
+  );
+  const seen = new Set(base.nodes.map(n => n.id));
+
+  for (const rel of relationships) {
+    if (rel.strength < minStrength) continue;
+
+    // Skip if both entities aren't in the graph
+    if (!seen.has(rel.sourceEntityId) || !seen.has(rel.targetEntityId)) continue;
+
+    const key = `${rel.sourceEntityId}::${rel.targetEntityId}`;
+    const reverseKey = `${rel.targetEntityId}::${rel.sourceEntityId}`;
+
+    // Skip if link already exists in either direction
+    if (existingLinks.has(key) || existingLinks.has(reverseKey)) continue;
+
+    base.links.push({
+      source: rel.sourceEntityId,
+      target: rel.targetEntityId,
+      strength: rel.strength,
+      tier: rel.tier === 'none' ? undefined : rel.tier,
+      sharedSignals: rel.sharedSignalCount,
+      lastInteraction: rel.lastInteraction ?? undefined,
+    });
+  }
+
+  return { graph: base, relationships };
 }

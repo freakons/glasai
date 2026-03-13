@@ -1,6 +1,7 @@
 import Parser from 'rss-parser';
 import { RawSignal } from '../types';
 import { SourceAdapter } from './sourceAdapter';
+import { cleanText, cleanPlainText, canonicalizeUrl, normalizeSourceName } from '@/services/normalization/helpers';
 
 export class RssSource implements SourceAdapter {
   name: string;
@@ -15,12 +16,12 @@ export class RssSource implements SourceAdapter {
 
   async fetchSignals(): Promise<RawSignal[]> {
     const feed = await this.parser.parseURL(this.feedUrl);
-    this.name = feed.title ?? this.feedUrl;
+    this.name = normalizeSourceName(feed.title) || this.feedUrl;
 
     return (feed.items ?? []).map((item) => ({
-      title: item.title ?? '',
-      content: item.contentSnippet ?? item.content ?? item.summary ?? '',
-      url: item.link,
+      title: cleanPlainText(item.title) || item.title || '',
+      content: cleanText(item.contentSnippet) || cleanText(item.content) || cleanText(item.summary) || '',
+      url: item.link ? canonicalizeUrl(item.link) : item.link,
       source: this.name,
       published_at: item.pubDate,
     }));

@@ -41,9 +41,11 @@ const CACHE_HEADERS = { 'Cache-Control': 's-maxage=30, stale-while-revalidate=12
 function isAuthorised(req: NextRequest): boolean {
   const expected    = process.env.CRON_SECRET || '';
   if (!expected) return true; // local dev: no secret configured
-  const cronHeader  = req.headers.get('x-vercel-cron-secret') || '';
+  // Vercel cron sends Authorization: Bearer <CRON_SECRET>
+  const authHeader  = req.headers.get('authorization') || '';
+  const bearer      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   const querySecret = new URL(req.url).searchParams.get('secret') || '';
-  return cronHeader === expected || querySecret === expected;
+  return bearer === expected || querySecret === expected;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -7,6 +7,14 @@ export type GraphNode = {
 export type GraphLink = {
   source: string;
   target: string;
+  /** Relationship strength (0–100). Present on entity↔entity edges. */
+  strength?: number;
+  /** Qualitative tier: strong / moderate / weak. */
+  tier?: 'strong' | 'moderate' | 'weak';
+  /** Number of shared signals driving this edge. */
+  sharedSignals?: number;
+  /** ISO timestamp of the most recent shared interaction. */
+  lastInteraction?: string;
 };
 
 export type GraphData = {

@@ -29,7 +29,7 @@ export const runtime = 'nodejs';
  *   Add ?dry_run=true to validate auth + env without executing anything.
  *
  * Auth:
- *   - x-vercel-cron-secret header == CRON_SECRET env (Vercel cron scheduler)
+ *   - Authorization: Bearer <CRON_SECRET> header (Vercel cron scheduler)
  *   - ?secret= query param == CRON_SECRET env (manual trigger)
  *   - x-admin-secret header == ADMIN_SECRET env (marks trigger_type=admin)
  *   - No CRON_SECRET configured → open in local dev only (NODE_ENV !== production)
@@ -47,10 +47,11 @@ import { ingestRss }                            from '@/services/ingestion/rssIn
 import { getRecentEvents }                      from '@/services/storage/eventStore';
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
 import { saveSignals }                          from '@/services/storage/signalStore';
-import { acquirePipelineLock, releasePipelineLock } from '@/lib/pipeline/lock';
+import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { generatePageSnapshots }               from '@/lib/pipeline/snapshot';
 import { refreshCaches }                        from '@/lib/pipeline/cacheRefresh';
 import { dbQuery }                              from '@/db/client';
+import { TimeoutError }                         from '@/lib/withTimeout';
 import type { TriggerType, RunStatus, PipelineStageResult } from '@/lib/pipeline/types';
 import { toDbStatus }                           from '@/lib/pipeline/types';
 
@@ -69,15 +70,25 @@ const TIMEOUT = {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Extract the bearer token from the Authorization header, if present.
+ * Vercel cron sends `Authorization: Bearer <CRON_SECRET>`.
+ */
+function extractBearerToken(req: NextRequest): string {
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth.startsWith('Bearer ')) return auth.slice(7);
+  return '';
+}
+
 function detectTriggerType(req: NextRequest): TriggerType {
   // Admin secret header → admin trigger
   const adminHeader = req.headers.get('x-admin-secret') ?? '';
   if (adminHeader && adminHeader === (process.env.ADMIN_SECRET ?? '')) return 'admin';
 
-  // Vercel cron secret header → cron trigger
+  // Vercel cron: Authorization: Bearer <CRON_SECRET>
   const cronSecret = process.env.CRON_SECRET ?? '';
-  const cronHeader = req.headers.get('x-vercel-cron-secret') ?? '';
-  if (cronSecret && cronHeader === cronSecret) return 'cron';
+  const bearer = extractBearerToken(req);
+  if (cronSecret && bearer === cronSecret) return 'cron';
 
   return 'manual';
 }
@@ -94,11 +105,12 @@ function isAuthorized(req: NextRequest): boolean {
   if (!cronSecret && !adminSecret) return true;
 
   // Do NOT trust User-Agent for authentication — it is trivially spoofable.
-  const cronHeader  = req.headers.get('x-vercel-cron-secret') ?? '';
+  // Check: Authorization: Bearer <secret> (Vercel cron), query param, admin header
+  const bearer      = extractBearerToken(req);
   const querySecret = new URL(req.url).searchParams.get('secret') ?? '';
   const adminHeader = req.headers.get('x-admin-secret') ?? '';
 
-  if (cronSecret  && (cronHeader === cronSecret || querySecret === cronSecret)) return true;
+  if (cronSecret  && (bearer === cronSecret || querySecret === cronSecret)) return true;
   if (adminSecret && adminHeader === adminSecret) return true;
 
   return false;
@@ -106,23 +118,55 @@ function isAuthorized(req: NextRequest): boolean {
 
 // ── Stage runner with timeout ─────────────────────────────────────────────────
 
+/**
+ * Runs `fn` with a hard deadline of `timeoutMs`.
+ *
+ * On timeout, rejects with a {@link TimeoutError} so callers can distinguish
+ * a timeout from other failures in stage results and structured logs.
+ * The `timedOut` flag is always set in the return value for easy inspection.
+ *
+ * @param name       Stage name — included in error messages and log lines.
+ * @param fn         Async stage work.
+ * @param timeoutMs  Maximum allowed duration for this stage.
+ * @param requestId  Correlation ID from the originating request (for logs).
+ */
 async function runStage<T>(
   name: string,
   fn: () => Promise<T>,
   timeoutMs: number,
-): Promise<{ result?: T; error?: string; durationMs: number }> {
+  requestId?: string,
+): Promise<{ result?: T; error?: string; durationMs: number; timedOut: boolean }> {
   const t0 = Date.now();
-  const timer = new Promise<never>((_, reject) =>
-    setTimeout(
-      () => reject(new Error(`stage "${name}" timed out after ${timeoutMs}ms`)),
+  let handle: ReturnType<typeof setTimeout> | undefined;
+
+  const timer = new Promise<never>((_, reject) => {
+    handle = setTimeout(
+      () => reject(new TimeoutError(name, timeoutMs, requestId)),
       timeoutMs,
-    ),
-  );
+    );
+  });
+
   try {
     const result = await Promise.race([fn(), timer]);
-    return { result, durationMs: Date.now() - t0 };
+    return { result, durationMs: Date.now() - t0, timedOut: false };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - t0 };
+    const durationMs = Date.now() - t0;
+    const timedOut = err instanceof TimeoutError;
+
+    if (timedOut) {
+      console.warn(
+        `[pipeline] timeout requestId=${requestId ?? 'n/a'} stage=${name}` +
+        ` elapsed=${durationMs}ms timeout=${timeoutMs}ms partial=true aborted=false`,
+      );
+    }
+
+    return {
+      error:     err instanceof Error ? err.message : String(err),
+      durationMs,
+      timedOut,
+    };
+  } finally {
+    if (handle !== undefined) clearTimeout(handle);
   }
 }
 
@@ -250,179 +294,167 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Concurrency lock ──────────────────────────────────────────────────────
-  const lockResult = await acquirePipelineLock(triggerType);
+  const guard = await withPipelineLock(triggerType, correlationId, 'pipeline/run', async () => {
+    const stages: PipelineStageResult[] = [];
+    let errorsCount = 0;
+    let articlesFetched = 0, articlesInserted = 0, articlesDeduped = 0;
+    let signalsGenerated = 0;
 
-  if (!lockResult.acquired) {
-    logWithRequestId(correlationId, 'pipeline/run', `skipped — ${lockResult.reason}`);
-    await persistSkippedRun(correlationId, triggerType, lockResult.reason);
-
-    return NextResponse.json(
-      {
-        ok:          false,
-        status:      'skipped_active_run' as RunStatus,
-        runId:       correlationId,
-        requestId:   correlationId,
-        triggerType,
-        dryRun:      false,
-        startedAt:   new Date(t0).toISOString(),
-        completedAt: new Date().toISOString(),
-        durationMs:  Date.now() - t0,
-        message:     `Pipeline already active: ${lockResult.reason}`,
-        lockedBy:    lockResult.lockedBy,
-      },
-      { status: 409, headers: { 'x-request-id': correlationId } },
-    );
-  }
-
-  // ── Execute pipeline ──────────────────────────────────────────────────────
-  const stages: PipelineStageResult[] = [];
-  let errorsCount = 0;
-  let articlesFetched = 0, articlesInserted = 0, articlesDeduped = 0;
-  let signalsGenerated = 0;
-
-  const overallTimer = new Promise<never>((_, reject) =>
-    setTimeout(
-      () => reject(new Error(`overall pipeline timed out after ${TIMEOUT.OVERALL}ms`)),
-      TIMEOUT.OVERALL,
-    ),
-  );
-
-  async function executeStages(): Promise<void> {
-    // Stage 1 — Ingestion (RSS primary + GNews secondary)
-    const ingest = await runStage('ingest', async () => {
-      // Stage 1a: RSS ingestion (primary — no API quota limits)
-      let rssResult = {
-        sourcesAttempted: 0, sourcesFailed: 0, sourcesRateLimited: 0, sourcesEmpty: 0,
-        articlesNew: 0, articlesDeduped: 0, eventsNew: 0, eventsDeduped: 0,
-      };
-      try {
-        rssResult = await ingestRss();
-      } catch (rssErr) {
-        console.error('[pipeline] RSS ingestion threw unexpectedly:', rssErr instanceof Error ? rssErr.message : String(rssErr));
-      }
-
-      // Stage 1b: GNews ingestion (secondary — quota-aware, reduced queries)
-      const gnewsResult = await ingestGNews();
-
-      if (gnewsResult.rateLimited) {
-        console.warn('[pipeline] GNews rate-limited — relying on RSS sources this run');
-      }
-
-      const totalFetched   = rssResult.articlesNew + rssResult.articlesDeduped + gnewsResult.total;
-      const totalInserted  = rssResult.articlesNew + gnewsResult.ingested;
-      const totalDeduped   = rssResult.articlesDeduped + gnewsResult.skipped;
-
-      if (totalInserted === 0 && totalFetched === 0) {
-        console.warn('[pipeline] ingest stage: zero articles from all sources — possible source starvation');
-      } else if (totalInserted === 0) {
-        console.log(`[pipeline] ingest stage: ${totalFetched} fetched but all deduped (pipeline already up-to-date)`);
-      }
-
-      return {
-        total: totalFetched,
-        ingested: totalInserted,
-        skipped: totalDeduped,
-        sources: {
-          rss: {
-            sourcesAttempted: rssResult.sourcesAttempted,
-            sourcesFailed: rssResult.sourcesFailed,
-            sourcesRateLimited: rssResult.sourcesRateLimited,
-            sourcesEmpty: rssResult.sourcesEmpty,
-            articlesNew: rssResult.articlesNew,
-            eventsNew: rssResult.eventsNew,
-          },
-          gnews: {
-            queriesAttempted: gnewsResult.queriesAttempted,
-            total: gnewsResult.total,
-            ingested: gnewsResult.ingested,
-            rateLimited: gnewsResult.rateLimited,
-          },
+    const overallTimer = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => {
+          console.warn(
+            `[pipeline] timeout requestId=${correlationId} stage=overall` +
+            ` timeout=${TIMEOUT.OVERALL}ms partial=true aborted=true`,
+          );
+          reject(new TimeoutError('overall', TIMEOUT.OVERALL, correlationId));
         },
-      };
-    }, TIMEOUT.INGEST);
-
-    if (ingest.error) {
-      stages.push({ stage: 'ingest', status: 'error', durationMs: ingest.durationMs, error: ingest.error });
-      errorsCount++;
-    } else {
-      const r = ingest.result!;
-      articlesFetched  = r.total;
-      articlesInserted = r.ingested;
-      articlesDeduped  = r.skipped;
-      stages.push({
-        stage: 'ingest', status: 'ok', durationMs: ingest.durationMs,
-        articlesFetched, articlesInserted, articlesDeduped,
-        sources: r.sources,
-      });
-    }
-
-    // Stage 2 — Signal generation
-    const signals = await runStage(
-      'signals',
-      async () => {
-        const events  = await getRecentEvents(500);
-        const sigs    = generateSignalsFromEvents(events);
-        const saved   = await saveSignals(sigs);
-        return { eventsLoaded: events.length, signalsSaved: saved };
-      },
-      TIMEOUT.SIGNALS,
+        TIMEOUT.OVERALL,
+      ),
     );
-    if (signals.error) {
-      stages.push({ stage: 'signals', status: 'error', durationMs: signals.durationMs, error: signals.error });
-      errorsCount++;
-    } else {
-      signalsGenerated = signals.result!.signalsSaved;
-      stages.push({
-        stage: 'signals', status: 'ok', durationMs: signals.durationMs,
-        eventsLoaded: signals.result!.eventsLoaded, signalsGenerated,
-      });
+
+    async function executeStages(): Promise<void> {
+      // Stage 1 — Ingestion (RSS primary + GNews secondary)
+      const ingest = await runStage('ingest', async () => {
+        let rssResult = {
+          sourcesAttempted: 0, sourcesFailed: 0, sourcesRateLimited: 0, sourcesEmpty: 0,
+          articlesNew: 0, articlesDeduped: 0, eventsNew: 0, eventsDeduped: 0,
+        };
+        try {
+          rssResult = await ingestRss();
+        } catch (rssErr) {
+          console.error('[pipeline] RSS ingestion threw unexpectedly:', rssErr instanceof Error ? rssErr.message : String(rssErr));
+        }
+
+        const gnewsResult = await ingestGNews();
+
+        if (gnewsResult.rateLimited) {
+          console.warn('[pipeline] GNews rate-limited — relying on RSS sources this run');
+        }
+
+        const totalFetched   = rssResult.articlesNew + rssResult.articlesDeduped + gnewsResult.total;
+        const totalInserted  = rssResult.articlesNew + gnewsResult.ingested;
+        const totalDeduped   = rssResult.articlesDeduped + gnewsResult.skipped;
+
+        if (totalInserted === 0 && totalFetched === 0) {
+          console.warn('[pipeline] ingest stage: zero articles from all sources — possible source starvation');
+        } else if (totalInserted === 0) {
+          console.log(`[pipeline] ingest stage: ${totalFetched} fetched but all deduped (pipeline already up-to-date)`);
+        }
+
+        return {
+          total: totalFetched,
+          ingested: totalInserted,
+          skipped: totalDeduped,
+          sources: {
+            rss: {
+              sourcesAttempted: rssResult.sourcesAttempted,
+              sourcesFailed: rssResult.sourcesFailed,
+              sourcesRateLimited: rssResult.sourcesRateLimited,
+              sourcesEmpty: rssResult.sourcesEmpty,
+              articlesNew: rssResult.articlesNew,
+              eventsNew: rssResult.eventsNew,
+            },
+            gnews: {
+              queriesAttempted: gnewsResult.queriesAttempted,
+              total: gnewsResult.total,
+              ingested: gnewsResult.ingested,
+              rateLimited: gnewsResult.rateLimited,
+            },
+          },
+        };
+      }, TIMEOUT.INGEST, correlationId);
+
+      if (ingest.error) {
+        stages.push({ stage: 'ingest', status: 'error', durationMs: ingest.durationMs, error: ingest.error, timedOut: ingest.timedOut });
+        errorsCount++;
+      } else {
+        const r = ingest.result!;
+        articlesFetched  = r.total;
+        articlesInserted = r.ingested;
+        articlesDeduped  = r.skipped;
+        stages.push({
+          stage: 'ingest', status: 'ok', durationMs: ingest.durationMs,
+          articlesFetched, articlesInserted, articlesDeduped,
+          sources: r.sources,
+        });
+      }
+
+      // Stage 2 — Signal generation
+      const signals = await runStage(
+        'signals',
+        async () => {
+          const events  = await getRecentEvents(500);
+          const sigs    = generateSignalsFromEvents(events);
+          const saved   = await saveSignals(sigs);
+          return { eventsLoaded: events.length, signalsSaved: saved };
+        },
+        TIMEOUT.SIGNALS,
+        correlationId,
+      );
+      if (signals.error) {
+        stages.push({ stage: 'signals', status: 'error', durationMs: signals.durationMs, error: signals.error, timedOut: signals.timedOut });
+        errorsCount++;
+      } else {
+        signalsGenerated = signals.result!.signalsSaved;
+        stages.push({
+          stage: 'signals', status: 'ok', durationMs: signals.durationMs,
+          eventsLoaded: signals.result!.eventsLoaded, signalsGenerated,
+        });
+      }
+
+      // Stage 3 — Snapshot generation
+      const snapshot = await runStage('snapshots', () => generatePageSnapshots(), TIMEOUT.SNAPSHOT, correlationId);
+      if (snapshot.error) {
+        stages.push({ stage: 'snapshots', status: 'error', durationMs: snapshot.durationMs, error: snapshot.error, timedOut: snapshot.timedOut });
+        errorsCount++;
+      } else {
+        const sr = snapshot.result!;
+        stages.push({
+          stage: 'snapshots', status: 'ok', durationMs: snapshot.durationMs,
+          snapshotsGenerated: sr.snapshotsGenerated,
+          snapshotKeys: sr.snapshots,
+          ...(sr.errors.length > 0 ? { snapshotErrors: sr.errors } : {}),
+        });
+      }
+
+      // Stage 4 — Cache refresh
+      const cache = await runStage('cache', () => refreshCaches(), TIMEOUT.CACHE, correlationId);
+      if (cache.error) {
+        stages.push({ stage: 'cache', status: 'error', durationMs: cache.durationMs, error: cache.error, timedOut: cache.timedOut });
+      } else {
+        const cr = cache.result!;
+        stages.push({
+          stage: 'cache', status: 'ok', durationMs: cache.durationMs,
+          redisKeysInvalidated: cr.redisKeysInvalidated,
+          routesRevalidated:    cr.routesRevalidated,
+          ...(cr.errors.length > 0 ? { cacheErrors: cr.errors } : {}),
+        });
+      }
     }
 
-    // Stage 3 — Snapshot generation
-    const snapshot = await runStage('snapshots', () => generatePageSnapshots(), TIMEOUT.SNAPSHOT);
-    if (snapshot.error) {
-      stages.push({ stage: 'snapshots', status: 'error', durationMs: snapshot.durationMs, error: snapshot.error });
-      errorsCount++;
-    } else {
-      const sr = snapshot.result!;
+    try {
+      await Promise.race([executeStages(), overallTimer]);
+    } catch (err) {
       stages.push({
-        stage: 'snapshots', status: 'ok', durationMs: snapshot.durationMs,
-        snapshotsGenerated: sr.snapshotsGenerated,
-        snapshotKeys: sr.snapshots,
-        ...(sr.errors.length > 0 ? { snapshotErrors: sr.errors } : {}),
+        stage:      'overall',
+        status:     'error',
+        durationMs: Date.now() - t0,
+        error:      err instanceof Error ? err.message : String(err),
       });
+      errorsCount++;
     }
 
-    // Stage 4 — Cache refresh
-    const cache = await runStage('cache', () => refreshCaches(), TIMEOUT.CACHE);
-    if (cache.error) {
-      // Cache refresh is a warning, not a hard error
-      stages.push({ stage: 'cache', status: 'error', durationMs: cache.durationMs, error: cache.error });
-    } else {
-      const cr = cache.result!;
-      stages.push({
-        stage: 'cache', status: 'ok', durationMs: cache.durationMs,
-        redisKeysInvalidated: cr.redisKeysInvalidated,
-        routesRevalidated:    cr.routesRevalidated,
-        ...(cr.errors.length > 0 ? { cacheErrors: cr.errors } : {}),
-      });
-    }
+    return { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsGenerated };
+  });
+
+  if (guard.locked) {
+    logWithRequestId(correlationId, 'pipeline/run', `skipped — ${guard.reason}`);
+    await persistSkippedRun(correlationId, triggerType, guard.reason);
+    return pipelineLockedResponse(correlationId, guard);
   }
 
-  try {
-    await Promise.race([executeStages(), overallTimer]);
-  } catch (err) {
-    stages.push({
-      stage:      'overall',
-      status:     'error',
-      durationMs: Date.now() - t0,
-      error:      err instanceof Error ? err.message : String(err),
-    });
-    errorsCount++;
-  } finally {
-    await releasePipelineLock(lockResult.lockId);
-  }
-
+  const { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsGenerated } = guard.result;
   const durationMs = Date.now() - t0;
 
   const overallStatus: RunStatus =
