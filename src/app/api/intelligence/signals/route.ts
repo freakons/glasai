@@ -5,6 +5,7 @@ import { createRequestId, logWithRequestId } from '@/lib/requestId';
 import { parseSignalMode } from '@/lib/signals/signalModes';
 import { getCache, setCache, MEM_TTL } from '@/lib/memoryCache';
 import { composeFeed } from '@/lib/signals/feedComposer';
+import { enrichSignalsWithLinks, buildSignalClusters } from '@/lib/signals/crossSignalLinker';
 
 // s-maxage=10 keeps CDN copies fresh; stale-while-revalidate extends TTL gracefully
 const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60' };
@@ -16,10 +17,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const mode  = parseSignalMode(searchParams.get('mode'));
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 200);
+  const includeLinks = searchParams.get('links') === 'true';
 
   // In-process memory cache (instance-local, 10 s).
   // Reduces repeated DB reads on hot polling cycles between pipeline runs.
-  const memKey = `intelligence:signals:${mode}:${limit}:v2`;
+  const memKey = `intelligence:signals:${mode}:${limit}:${includeLinks}:v3`;
   const memCached = getCache<Record<string, unknown>>(memKey, MEM_TTL.INTELLIGENCE_SIGNALS);
   if (memCached) {
     logWithRequestId(reqId, 'intelligence/signals', `cache_hit source=memory mode=${mode} ms=${Date.now() - t0}`);
@@ -35,9 +37,26 @@ export async function GET(req: NextRequest) {
       minSignificance: mode === 'standard' ? 30 : mode === 'premium' ? 50 : 0,
     });
 
+    // Optionally enrich signals with cross-signal intelligence links.
+    const outputSignals = includeLinks
+      ? enrichSignalsWithLinks(composed, 5)
+      : composed;
+
+    // Build signal clusters when links are requested.
+    const clusters = includeLinks
+      ? buildSignalClusters(composed)
+      : undefined;
+
     const source = composed.length > 0 ? 'db' : 'empty';
-    logWithRequestId(reqId, 'intelligence/signals', `cache_miss source=${source} mode=${mode} raw=${rawSignals.length} composed=${composed.length} ms=${Date.now() - t0}`);
-    const payload = { ok: true, mode, signals: composed, count: composed.length, source };
+    logWithRequestId(reqId, 'intelligence/signals', `cache_miss source=${source} mode=${mode} raw=${rawSignals.length} composed=${composed.length} links=${includeLinks} ms=${Date.now() - t0}`);
+    const payload = {
+      ok: true,
+      mode,
+      signals: outputSignals,
+      count: outputSignals.length,
+      source,
+      ...(clusters !== undefined ? { clusters } : {}),
+    };
     // Only cache non-empty results; empty state should resolve quickly once the
     // pipeline runs, so we don't want to lock callers into a stale empty view.
     if (composed.length > 0) setCache(memKey, payload, MEM_TTL.INTELLIGENCE_SIGNALS);
