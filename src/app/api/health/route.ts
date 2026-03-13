@@ -36,6 +36,7 @@ import { pingRedis, isRedisConfigured }         from '@/lib/cache/redis';
 import { getPipelineLockStatus }                from '@/lib/pipeline/lock';
 import { getProvider, getActiveProviderName }   from '@/lib/ai';
 import { createRequestId }                      from '@/lib/requestId';
+import { getCache, setCache, MEM_TTL }          from '@/lib/memoryCache';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,54 @@ export async function GET(req: NextRequest) {
   const requestId = req.headers.get('x-request-id') ?? createRequestId();
   const timestamp = new Date().toISOString();
 
+  const isAdmin = isAdminAuthenticated(req);
+
+  // ── Public minimal response (unauthenticated) ────────────────────────────
+  // For uptime-monitor traffic, serve a 5 s in-memory cached result so
+  // repeated probes within the same instance don't each trigger a DB ping.
+  // timestamp and requestId are always regenerated fresh for correlation.
+  // Admin diagnostics are never cached — operators need live subsystem data.
+  if (!isAdmin) {
+    const memHit = getCache<{ status: OverallGrade; ok: boolean }>('health:public', MEM_TTL.HEALTH_PUBLIC);
+    if (memHit) {
+      return NextResponse.json(
+        { status: memHit.status, ok: memHit.ok, timestamp, requestId },
+        {
+          status:  memHit.ok ? 200 : 503,
+          headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        },
+      );
+    }
+
+    // Cache miss — perform live DB connectivity check.
+    let dbConnected = false;
+    let dbTimedOut  = false;
+    try {
+      const db   = withDbContext({ operation: 'health:ping', requestId });
+      const rows = await db.queryStrict<{ now: string }>`SELECT NOW() AS now`;
+      dbConnected = rows.length > 0;
+    } catch (err) {
+      dbTimedOut = err instanceof TimeoutError;
+    }
+
+    const publicGrade: OverallGrade = dbConnected
+      ? 'healthy'
+      : (dbTimedOut ? 'degraded' : 'failing');
+
+    // Populate cache so next probe in this instance skips the DB ping.
+    setCache('health:public', { status: publicGrade, ok: dbConnected }, MEM_TTL.HEALTH_PUBLIC);
+
+    return NextResponse.json(
+      { status: publicGrade, ok: dbConnected, timestamp, requestId },
+      {
+        status:  dbConnected ? 200 : 503,
+        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+      },
+    );
+  }
+
+  // ── Authenticated full diagnostics — always live, never cached ───────────
+
   // ── 1. Database connectivity ──────────────────────────────────────────────
   let dbConnected = false;
   let dbError: string | undefined;
@@ -117,29 +166,6 @@ export async function GET(req: NextRequest) {
     dbTimedOut = err instanceof TimeoutError;
     dbError = err instanceof Error ? err.message : String(err);
   }
-
-  const isAdmin = isAdminAuthenticated(req);
-
-  // ── Public minimal response (unauthenticated) ────────────────────────────
-  if (!isAdmin) {
-    const publicGrade: OverallGrade = dbConnected
-      ? 'healthy'
-      : (dbTimedOut ? 'degraded' : 'failing');
-    return NextResponse.json(
-      {
-        status:    publicGrade,
-        ok:        dbConnected,
-        timestamp,
-        requestId,
-      },
-      {
-        status:  dbConnected ? 200 : 503,
-        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
-      },
-    );
-  }
-
-  // ── Authenticated full diagnostics ────────────────────────────────────────
 
   const subsystems: Record<string, SubsystemStatus> = {};
   const warnings: string[] = [];

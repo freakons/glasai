@@ -34,6 +34,7 @@ import { NextResponse }          from 'next/server';
 import { validateEnvironment }   from '@/lib/env';
 import { createRequestId, logWithRequestId } from '@/lib/requestId';
 import { getCache as redisGet, setCache as redisSet, TTL } from '@/lib/cache/redis';
+import { getCache as memGet, setCache as memSet, MEM_TTL } from '@/lib/memoryCache';
 import { broadcastOpportunity }  from '@/server/opportunitySocket';
 import { triggerPipelineOnce }   from '@/lib/pipelineTrigger';
 import { getSignals }            from '@/db/queries';
@@ -118,16 +119,27 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 const CACHE_HEADERS = { 'Cache-Control': 's-maxage=10, stale-while-revalidate=60' };
 const REDIS_KEY = 'signals:marketPulse';
+const MEM_KEY   = 'opportunities:marketPulse';
 
 export async function GET() {
   const t0 = Date.now();
   const reqId = createRequestId();
   validateEnvironment(['DATABASE_URL']);
 
-  // ── 0. Redis cache check ────────────────────────────────────────────────
+  // ── 0a. In-process memory cache (instance-local, 10 s) ─────────────────
+  // Fastest layer: avoids both the Redis round-trip and DB query on hot polls.
+  const memCached = memGet<Record<string, unknown>>(MEM_KEY, MEM_TTL.OPPORTUNITIES);
+  if (memCached) {
+    logWithRequestId(reqId, 'opportunities', `cache_hit source=memory ms=${Date.now() - t0}`);
+    return NextResponse.json(memCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
+  }
+
+  // ── 0b. Redis cache check ───────────────────────────────────────────────
   const redisCached = await redisGet(REDIS_KEY);
   if (redisCached) {
     logWithRequestId(reqId, 'opportunities', `cache_hit source=redis ms=${Date.now() - t0}`);
+    // Backfill memory cache so subsequent in-instance requests skip Redis too.
+    memSet(MEM_KEY, redisCached, MEM_TTL.OPPORTUNITIES);
     return NextResponse.json(redisCached, { headers: { ...CACHE_HEADERS, 'x-source': 'cache' } });
   }
 
@@ -191,8 +203,9 @@ export async function GET() {
   const payload = { marketBias, signals: ranked, source, timestamp: new Date().toISOString() };
   broadcastOpportunity({ type: 'opportunity_update', data: ranked });
 
-  // Store in Redis for subsequent requests
+  // Store in Redis for cross-instance sharing, and in memory for fast local hits.
   await redisSet(REDIS_KEY, payload, TTL.SIGNALS);
+  memSet(MEM_KEY, payload, MEM_TTL.OPPORTUNITIES);
 
   logWithRequestId(reqId, 'opportunities', `cache_miss source=${source} signals=${ranked.length} ms=${Date.now() - t0}`);
   return NextResponse.json(payload, { headers: { ...CACHE_HEADERS, 'x-source': source } });
