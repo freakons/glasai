@@ -23,7 +23,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSignals } from '@/db/queries';
-import { MOCK_SIGNALS } from '@/data/mockSignals';
+import { MOCK_SIGNALS, type Signal } from '@/data/mockSignals';
 import { detectMajorEvents, type MajorEvent, type MajorEventCategory } from '@/lib/signals/eventDetector';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -61,40 +61,13 @@ export async function GET(req: NextRequest) {
 
   try {
     // Try to get signals from DB first
-    let signals: Array<{
-      id: string;
-      title: string;
-      category: string;
-      entityId: string;
-      entityName: string;
-      summary: string;
-      date: string;
-      confidence: number;
-      significanceScore?: number | null;
-      sourceSupportCount?: number | null;
-    }> = [];
+    let signals: Signal[] = [];
     let source: 'db' | 'mock' | 'empty' = 'empty';
 
     try {
       const dbSignals = await getSignals(200);
       if (dbSignals.length > 0) {
-        // Map DB signals to the Signal shape expected by the detector
-        signals = dbSignals.map((s: Record<string, unknown>) => ({
-          id: String(s.id ?? ''),
-          title: String(s.title ?? ''),
-          category: String(s.category ?? 'research'),
-          entityId: String(s.entityId ?? s.entity_id ?? ''),
-          entityName: String(s.entityName ?? s.entity_name ?? ''),
-          summary: String(s.summary ?? s.description ?? ''),
-          date: String(s.date ?? s.createdAt ?? s.created_at ?? ''),
-          confidence: Number(s.confidence ?? s.confidenceScore ?? s.confidence_score ?? 50),
-          significanceScore: s.significanceScore != null ? Number(s.significanceScore)
-            : s.significance_score != null ? Number(s.significance_score)
-            : null,
-          sourceSupportCount: s.sourceSupportCount != null ? Number(s.sourceSupportCount)
-            : s.source_support_count != null ? Number(s.source_support_count)
-            : null,
-        }));
+        signals = dbSignals;
         source = 'db';
       }
     } catch {
