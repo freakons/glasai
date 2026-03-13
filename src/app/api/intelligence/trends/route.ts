@@ -26,7 +26,7 @@ export async function GET() {
     const rows = await dbQuery<TrendRow>`
       SELECT topic, category, signal_count, entities, summary, confidence, score, importance_score, velocity_score
       FROM trends
-      ORDER BY confidence DESC
+      ORDER BY importance_score DESC NULLS LAST, confidence DESC
       LIMIT 20
     `;
 

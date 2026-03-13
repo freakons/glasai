@@ -377,7 +377,10 @@ export async function getSignals(
         ON sc.signal_id = s.id AND sc.status = 'ready'
       WHERE (s.status IS NULL OR s.status IN ('auto', 'published'))
         AND (s.confidence_score IS NULL OR s.confidence_score >= ${minCs})
-      ORDER BY s.created_at DESC
+      ORDER BY
+        s.significance_score DESC NULLS LAST,
+        s.confidence_score DESC NULLS LAST,
+        s.created_at DESC
       LIMIT ${safeLimit}
     `;
     return rows.map(rowToSignal);
@@ -401,7 +404,10 @@ export async function getSignals(
     FROM signals
     WHERE (status IS NULL OR status IN ('auto', 'published'))
       AND (confidence_score IS NULL OR confidence_score >= ${minCs})
-    ORDER BY created_at DESC
+    ORDER BY
+      significance_score DESC NULLS LAST,
+      confidence_score DESC NULLS LAST,
+      created_at DESC
     LIMIT ${safeLimit}
   `;
 

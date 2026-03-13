@@ -104,6 +104,8 @@ export const SIGNAL_MODES: Record<SignalMode, SignalModeConfig> = {
    * standard — Balanced filtering.
    *
    * Read path:  Only 'auto' and 'published' signals with confidence ≥ 65.
+   *             Ordered by significance_score DESC (composite quality metric),
+   *             then confidence_score, then created_at for tie-breaking.
    *             This is the sane default for public-facing intelligence surfaces.
    * Write path: Default engine thresholds (multiplier = 1.0, unchanged).
    */
@@ -120,6 +122,8 @@ export const SIGNAL_MODES: Record<SignalMode, SignalModeConfig> = {
    * premium — Maximum quality, strictest filtering.
    *
    * Read path:  Only 'auto' and 'published' signals with confidence ≥ 85.
+   *             Ordered by significance_score DESC (same as standard) for
+   *             consistent ranking logic across all quality tiers.
    *             Surfaces only the highest-conviction signals.
    *             Intended for future paid / executive intelligence surfaces.
    * Write path: Same generation thresholds as standard (multiplier = 1.0);
