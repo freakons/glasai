@@ -23,6 +23,7 @@ import { saveArticle } from '../storage/articleStore';
 import { saveEvent } from '../storage/eventStore';
 import { classifyArticle } from '../intelligence/classifier';
 import { INTELLIGENCE_SOURCES } from '../../config/intelligenceSources';
+import { getEnabledSources, getHighPrioritySources } from '../../config/sources';
 import type { Event } from '@/types/intelligence';
 import {
   canonicalizeUrl,
@@ -40,21 +41,10 @@ import { detectAndLinkEntities } from '@/lib/entityResolver';
 // ─────────────────────────────────────────────────────────────────────────────
 // Primary source selection
 //
-// Curated subset of INTELLIGENCE_SOURCES used in main pipeline runs.
-// Criteria: publicly accessible without auth, updates frequently, high signal.
-// Avoids paywalled sources (The Information, Stratechery).
+// Sources are now driven by the structured registry in src/config/sources.ts.
+// All enabled sources are ingested; high-priority sources are fetched first.
+// No hardcoded feed arrays — add/remove sources in the registry only.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const PRIMARY_SOURCE_IDS: string[] = [
-  'venturebeat_ai',    // Multiple articles/day — broad AI coverage
-  'mit_tech_review_ai', // Quality AI analysis
-  'arxiv_ai',          // High-volume research papers — feeds RESEARCH_MOMENTUM
-  'crunchbase_ai',     // Funding news — feeds CAPITAL_ACCELERATION
-  'semafor_ai',        // Daily AI news
-  'openai_blog',       // Model releases — feeds MODEL_RELEASE_WAVE
-  'anthropic_news',    // Model releases
-  'interconnects',     // Independent AI research analysis
-];
 
 // Per-source article limit per pipeline run
 const ARTICLES_PER_SOURCE = 15;
@@ -96,12 +86,19 @@ export interface RssIngestResult {
  * @returns Structured ingestion result for the pipeline run record.
  */
 export async function ingestRss(): Promise<RssIngestResult> {
-  const sources = INTELLIGENCE_SOURCES.filter((s) =>
-    PRIMARY_SOURCE_IDS.includes(s.id)
-  );
+  // Build the source list from the structured registry.
+  // High-priority sources come first so they are fetched even if the
+  // pipeline times out before reaching the tail of the list.
+  const highPriority = getHighPrioritySources();
+  const allEnabled = getEnabledSources();
+  const normalPriority = allEnabled.filter((s) => s.priority !== 'high');
+
+  // Map canonical sources to legacy Source shape for rssFetcher compatibility
+  const sourceIds = [...highPriority, ...normalPriority].map((s) => s.id);
+  const sources = INTELLIGENCE_SOURCES.filter((s) => sourceIds.includes(s.id));
 
   if (sources.length === 0) {
-    console.warn('[rssIngester] No primary sources found — check PRIMARY_SOURCE_IDS against intelligenceSources registry');
+    console.warn('[rssIngester] No enabled sources found — check sources registry');
     return {
       sourcesAttempted: 0,
       sourcesFailed: 0,
