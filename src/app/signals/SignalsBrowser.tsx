@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { type Signal, type SignalCategory, type SignalContext } from '@/data/mockSignals';
+import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalMomentumBadge } from '@/components/signals/SignalMomentumBadge';
 import { CommandBar } from '@/ui/layout/CommandBar';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,14 +230,30 @@ function SignalItem({ signal }: { signal: Signal }) {
         <span className={`badge ${signal.category}`}>
           {signal.category.toUpperCase()}
         </span>
-        <span style={{
-          fontFamily: 'var(--fm)',
-          fontSize: '10.5px',
-          color: confColor,
-          letterSpacing: '0.05em',
-        }}>
-          {signal.confidence}% confidence
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SignalImpactBadge
+            signal={{
+              significanceScore: signal.significanceScore,
+              confidenceScore: signal.confidence,
+              sourceSupportCount: signal.sourceSupportCount,
+              affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
+            }}
+            showLabel={false}
+          />
+          {signal.momentum && (
+            <SignalMomentumBadge momentum={signal.momentum} showLabel={false} />
+          )}
+          <span style={{
+            fontFamily: 'var(--fm)',
+            fontSize: '10.5px',
+            color: confColor,
+            letterSpacing: '0.05em',
+          }}
+          title={`Confidence: ${signal.confidence}% — Overall trust level for this signal.`}
+          >
+            {signal.confidence}%
+          </span>
+        </div>
       </div>
 
       {/* Title */}

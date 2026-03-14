@@ -13,6 +13,8 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
   info: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>,
   'share-2': <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
   activity: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+  star: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
+  columns: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>,
 };
 
 export function Sidebar() {
@@ -27,7 +29,7 @@ export function Sidebar() {
     <aside className="sidebar" id="sb">
       <div className="logo-wrap">
         <div className="logo-row">
-          <div className="logo-gem">OM</div>
+          <div className="logo-gem">Om</div>
           <div className="logo-name">{siteConfig.name}</div>
         </div>
         <div className="logo-tag">AI INTELLIGENCE TERMINAL</div>
@@ -65,6 +67,20 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="sb-foot">
+        <button
+          className="tour-restart-link"
+          onClick={() => {
+            const fn = (window as unknown as Record<string, unknown>).__omStartTour;
+            if (typeof fn === 'function') fn();
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+          </svg>
+          Help &middot; Start tour
+        </button>
         <div className="sb-brand">
           <span className="sb-dot" />
           DATA REFRESHED DAILY &middot; {siteConfig.name}

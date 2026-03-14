@@ -2,14 +2,14 @@
  * Site-wide configuration — single source of truth for branding, URLs, and metadata.
  */
 export const siteConfig = {
-  name: 'OM Terminal',
+  name: 'Omterminal',
   tagline: 'Stop reading AI news. Start seeing the board.',
   description:
     'AI regulation, model releases, funding events, and global policy — structured, verified, and analyzed. One terminal. Every signal that matters.',
   url: 'https://omterminal.com',
   domain: 'omterminal.com',
   ogImage: '/og-image.png',
-  creator: 'OM Terminal',
+  creator: 'Omterminal',
   email: 'digest@omterminal.com',
 
   nav: {
@@ -21,6 +21,8 @@ export const siteConfig = {
       { label: 'Models', href: '/models', id: 'models', icon: 'cpu', chip: null },
       { label: 'Funding', href: '/funding', id: 'funding', icon: 'trending-up', chip: null },
       { label: 'Ecosystem Graph', href: '/graph', id: 'graph', icon: 'share-2', chip: null },
+      { label: 'Watchlist', href: '/watchlist', id: 'watchlist', icon: 'star', chip: null },
+      { label: 'Compare', href: '/compare', id: 'compare', icon: 'columns', chip: null },
     ],
     info: [
       { label: 'About', href: '/about', id: 'about', icon: 'info' },

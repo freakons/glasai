@@ -75,8 +75,8 @@ export function Sidebar() {
     <aside className="il-sb" id="il-sb">
       <div className="il-sb-logo">
         <div className="logo-row">
-          <div className="logo-gem">OM</div>
-          <div className="logo-name">OM Terminal</div>
+          <div className="logo-gem">Om</div>
+          <div className="logo-name">Omterminal</div>
         </div>
         <div className="logo-tag">AI INTELLIGENCE TERMINAL</div>
       </div>
@@ -98,7 +98,7 @@ export function Sidebar() {
       <div className="il-sb-foot">
         <div className="sb-brand">
           <span className="sb-dot" />
-          LIVE INTELLIGENCE &middot; OM TERMINAL
+          LIVE INTELLIGENCE &middot; OMTERMINAL
         </div>
       </div>
     </aside>

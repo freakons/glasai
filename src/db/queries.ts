@@ -434,6 +434,247 @@ export async function getSignals(
 }
 
 /**
+ * Fetch a single signal by ID, including its context if available.
+ *
+ * Returns null when the signal doesn't exist or the DB is unavailable.
+ */
+export async function getSignalById(id: string): Promise<Signal | null> {
+  const hasContextTable = await tableExists('signal_contexts');
+
+  if (hasContextTable) {
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        s.id,
+        s.title,
+        s.summary,
+        s.description,
+        s.category,
+        s.signal_type,
+        s.entity_id,
+        s.entity_name,
+        s.confidence,
+        s.confidence_score,
+        s.date,
+        s.created_at,
+        s.significance_score,
+        s.source_support_count,
+        sc.id                     AS ctx_id,
+        sc.summary                AS ctx_summary,
+        sc.why_it_matters         AS ctx_why_it_matters,
+        sc.affected_entities      AS ctx_affected_entities,
+        sc.implications           AS ctx_implications,
+        sc.confidence_explanation AS ctx_confidence_explanation,
+        sc.source_basis           AS ctx_source_basis,
+        sc.model_provider         AS ctx_model_provider,
+        sc.model_name             AS ctx_model_name,
+        sc.prompt_version         AS ctx_prompt_version,
+        sc.status                 AS ctx_status,
+        sc.generation_error       AS ctx_generation_error,
+        sc.created_at             AS ctx_created_at,
+        sc.updated_at             AS ctx_updated_at
+      FROM signals s
+      LEFT JOIN signal_contexts sc
+        ON sc.signal_id = s.id AND sc.status = 'ready'
+      WHERE s.id = ${id}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rowToSignal(rows[0]) : null;
+  }
+
+  const rows = await dbQuery<SignalRow>`
+    SELECT
+      id, title, summary, description, category, signal_type,
+      entity_id, entity_name, confidence, confidence_score,
+      date, created_at, significance_score, source_support_count
+    FROM signals
+    WHERE id = ${id}
+    LIMIT 1
+  `;
+  return rows.length > 0 ? rowToSignal(rows[0]) : null;
+}
+
+/**
+ * Fetch signals related to a given signal by shared entity.
+ *
+ * Returns up to `limit` signals for the same entity, excluding the
+ * signal itself.
+ */
+export async function getRelatedSignals(
+  signalId: string,
+  entityName: string,
+  limit = 5,
+): Promise<Signal[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 20);
+
+  const rows = await dbQuery<SignalRow>`
+    SELECT
+      id, title, summary, description, category, signal_type,
+      entity_id, entity_name, confidence, confidence_score,
+      date, created_at, significance_score, source_support_count
+    FROM signals
+    WHERE entity_name = ${entityName}
+      AND id != ${signalId}
+      AND (status IS NULL OR status NOT IN ('rejected'))
+    ORDER BY significance_score DESC NULLS LAST, created_at DESC
+    LIMIT ${safeLimit}
+  `;
+  return rows.map(rowToSignal);
+}
+
+/**
+ * Fetch supporting events for a given signal.
+ *
+ * Resolution order (results are merged and deduplicated):
+ *   1. Direct linkage — events whose IDs are in signals.supporting_events[]
+ *   2. Back-reference — events whose signal_ids[] contain this signal ID
+ *   3. Entity fallback — events sharing the same entity_name, within 90 days
+ *
+ * Returns an empty array when no evidence can be found.
+ *
+ * @param signalId    The signal to find evidence for.
+ * @param entityName  The signal's entity name (used for fallback matching).
+ * @param limit       Maximum events to return (default 10).
+ */
+export async function getSupportingEventsForSignal(
+  signalId: string,
+  entityName: string,
+  limit = 10,
+): Promise<AiEvent[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    // Strategy: single query that UNIONs direct linkage, back-reference, and
+    // entity-based fallback, then deduplicates and limits.
+    const rows = await dbQuery<EventRow>`
+      WITH direct AS (
+        -- Events whose IDs are listed in signals.supporting_events[]
+        SELECT e.*
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+      ),
+      backref AS (
+        -- Events that reference this signal in their signal_ids[]
+        SELECT e.*
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+      ),
+      entity_match AS (
+        -- Fallback: events for the same entity within 90 days
+        SELECT e.*
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      ),
+      combined AS (
+        SELECT * FROM direct
+        UNION
+        SELECT * FROM backref
+        UNION
+        SELECT * FROM entity_match
+      )
+      SELECT
+        id, type, title, description,
+        entity_id, entity_name, company,
+        amount, signal_ids, timestamp, created_at
+      FROM combined
+      ORDER BY timestamp DESC
+      LIMIT ${safeLimit}
+    `;
+
+    return rows.map(rowToEvent);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch a single event by ID for the event detail page.
+ *
+ * Returns null when the event doesn't exist or the DB is unavailable.
+ */
+export async function getEventById(id: string): Promise<AiEvent | null> {
+  try {
+    const rows = await dbQuery<EventRow>`
+      SELECT
+        id, type, title, description,
+        entity_id, entity_name, company,
+        amount, signal_ids, timestamp, created_at
+      FROM events
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rowToEvent(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch signals linked to a given event.
+ *
+ * Resolution: uses the event's signal_ids[] array for direct linkage,
+ * then falls back to signals sharing the same entity_name.
+ *
+ * @param eventId     The event ID.
+ * @param signalIds   Direct signal ID references from the event.
+ * @param entityName  The event's entity name (used for fallback matching).
+ * @param limit       Maximum signals to return (default 10).
+ */
+export async function getSignalsForEvent(
+  eventId: string,
+  signalIds: string[] | undefined,
+  entityName: string,
+  limit = 10,
+): Promise<Signal[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const rows = await dbQuery<SignalRow>`
+      WITH direct AS (
+        -- Signals directly referenced by event.signal_ids[]
+        SELECT s.*
+        FROM signals s
+        WHERE ${signalIds && signalIds.length > 0}
+          AND s.id = ANY(${signalIds ?? []}::text[])
+      ),
+      backref AS (
+        -- Signals whose supporting_events[] contain this event
+        SELECT s.*
+        FROM signals s
+        WHERE s.supporting_events @> ARRAY[${eventId}]::text[]
+      ),
+      entity_match AS (
+        -- Fallback: signals for the same entity
+        SELECT s.*
+        FROM signals s
+        WHERE s.entity_name = ${entityName}
+          AND s.entity_name != ''
+          AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+      ),
+      combined AS (
+        SELECT * FROM direct
+        UNION
+        SELECT * FROM backref
+        UNION
+        SELECT * FROM entity_match
+      )
+      SELECT
+        id, title, summary, description, category, signal_type,
+        entity_id, entity_name, confidence, confidence_score,
+        date, created_at, significance_score, source_support_count
+      FROM combined
+      ORDER BY significance_score DESC NULLS LAST, created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch AI ecosystem events from the database.
  *
  * Reads from the `events` table populated by the ingestion pipeline.
@@ -500,6 +741,458 @@ export async function getEntities(limit = 50): Promise<EntityProfile[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Entity Dossier Queries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch a single entity by name for the entity dossier page.
+ *
+ * Returns null when the entity doesn't exist or the DB is unavailable.
+ */
+export async function getEntityByName(name: string): Promise<EntityProfile | null> {
+  try {
+    const rows = await dbQuery<EntityRow>`
+      SELECT
+        id, name, type, description, sector, country,
+        founded, website, risk_level, tags, financial_scale, created_at
+      FROM entities
+      WHERE name = ${name}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rowToEntity(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a single entity by URL slug for the entity dossier page.
+ *
+ * Matches the slug against a slugified version of the entity name.
+ * Falls back to fetching all entities and matching client-side because
+ * PostgreSQL doesn't have a built-in slugify that mirrors our TS util.
+ */
+export async function getEntityBySlug(slug: string): Promise<EntityProfile | null> {
+  // Import lazily to avoid circular deps
+  const { slugify } = await import('@/utils/sanitize');
+  try {
+    const rows = await dbQuery<EntityRow>`
+      SELECT
+        id, name, type, description, sector, country,
+        founded, website, risk_level, tags, financial_scale, created_at
+      FROM entities
+      ORDER BY created_at ASC
+    `;
+    const match = rows.find((r) => slugify(r.name) === slug);
+    return match ? rowToEntity(match) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch signals linked to an entity via the signal_entities junction table.
+ *
+ * Used by the entity dossier page to show recent intelligence activity.
+ *
+ * @param entityName  The entity name to match.
+ * @param limit       Maximum signals to return (default 20).
+ */
+export async function getSignalsForEntity(
+  entityName: string,
+  limit = 20,
+): Promise<Signal[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const hasJunction = await tableExists('signal_entities');
+
+    if (hasJunction) {
+      const rows = await dbQuery<SignalRow>`
+        SELECT
+          s.id, s.title, s.summary, s.description,
+          s.category, s.signal_type, s.entity_id, s.entity_name,
+          s.confidence, s.confidence_score, s.date, s.created_at,
+          s.significance_score, s.source_support_count
+        FROM signals s
+        JOIN signal_entities se ON se.signal_id = s.id
+        JOIN entities e ON e.id = se.entity_id
+        WHERE e.name = ${entityName}
+          AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+        ORDER BY s.created_at DESC
+        LIMIT ${safeLimit}
+      `;
+      return rows.map(rowToSignal);
+    }
+
+    // Fallback: match on denormalized entity_name column
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        id, title, summary, description,
+        category, signal_type, entity_id, entity_name,
+        confidence, confidence_score, date, created_at,
+        significance_score, source_support_count
+      FROM signals
+      WHERE entity_name = ${entityName}
+        AND (status IS NULL OR status NOT IN ('rejected'))
+      ORDER BY created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch recent signals for multiple entities (watchlist feed).
+ *
+ * Accepts an array of entity names (from the client-side watchlist),
+ * returns deduplicated signals ordered by recency, limited to `limit`.
+ */
+export async function getSignalsForEntities(
+  entityNames: string[],
+  limit = 30,
+): Promise<Signal[]> {
+  if (entityNames.length === 0) return [];
+  const safeLimit = Math.min(Math.max(1, limit), 100);
+
+  try {
+    const hasJunction = await tableExists('signal_entities');
+
+    if (hasJunction) {
+      const rows = await dbQuery<SignalRow>`
+        SELECT DISTINCT ON (s.id)
+          s.id, s.title, s.summary, s.description,
+          s.category, s.signal_type, s.entity_id, s.entity_name,
+          s.confidence, s.confidence_score, s.date, s.created_at,
+          s.significance_score, s.source_support_count
+        FROM signals s
+        JOIN signal_entities se ON se.signal_id = s.id
+        JOIN entities e ON e.id = se.entity_id
+        WHERE e.name = ANY(${entityNames})
+          AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+        ORDER BY s.id, s.created_at DESC
+      `;
+      // Re-sort by recency after DISTINCT ON id
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return rows.slice(0, safeLimit).map(rowToSignal);
+    }
+
+    // Fallback: match on denormalized entity_name column
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        id, title, summary, description,
+        category, signal_type, entity_id, entity_name,
+        confidence, confidence_score, date, created_at,
+        significance_score, source_support_count
+      FROM signals
+      WHERE entity_name = ANY(${entityNames})
+        AND (status IS NULL OR status NOT IN ('rejected'))
+      ORDER BY created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch events linked to an entity.
+ *
+ * Matches on the denormalized entity_name column in the events table.
+ *
+ * @param entityName  The entity name to match.
+ * @param limit       Maximum events to return (default 20).
+ */
+export async function getEventsForEntity(
+  entityName: string,
+  limit = 20,
+): Promise<AiEvent[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const rows = await dbQuery<EventRow>`
+      SELECT
+        id, type, title, description,
+        entity_id, entity_name, company,
+        amount, signal_ids, timestamp, created_at
+      FROM events
+      WHERE entity_name = ${entityName}
+      ORDER BY timestamp DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToEvent);
+  } catch {
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Timeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TimelineItem {
+  type: 'signal' | 'event';
+  id: string;
+  title: string;
+  category: string;
+  timestamp: string;
+  confidence?: number;
+  amount?: string;
+  href: string;
+}
+
+/**
+ * Fetch a merged, chronologically-sorted timeline of signals and events
+ * for a single entity.
+ *
+ * @param entityName  The entity name to match.
+ * @param limit       Maximum items to return (default 25, max 50).
+ */
+export async function getEntityTimeline(
+  entityName: string,
+  limit = 25,
+): Promise<TimelineItem[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  const [signals, events] = await Promise.all([
+    getSignalsForEntity(entityName, safeLimit).catch(() => []),
+    getEventsForEntity(entityName, safeLimit).catch(() => []),
+  ]);
+
+  const items: TimelineItem[] = [];
+
+  for (const sig of signals) {
+    items.push({
+      type: 'signal',
+      id: sig.id,
+      title: sig.title,
+      category: sig.category,
+      timestamp: sig.date,
+      confidence: sig.confidence,
+      href: `/signals/${sig.id}`,
+    });
+  }
+
+  for (const evt of events) {
+    items.push({
+      type: 'event',
+      id: evt.id,
+      title: evt.title,
+      category: evt.type,
+      timestamp: evt.date,
+      amount: evt.amount,
+      href: `/events/${evt.id}`,
+    });
+  }
+
+  items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return items.slice(0, safeLimit);
+}
+
+/**
+ * Aggregated metrics for an entity dossier.
+ */
+export interface EntityDossierMetrics {
+  signalsTotal: number;
+  signals24h: number;
+  signals7d: number;
+  signals30d: number;
+  eventsTotal: number;
+  avgConfidence: number;
+  firstSeen: string | null;
+  lastActivity: string | null;
+}
+
+/**
+ * Compute aggregated metrics for an entity.
+ *
+ * Uses the signal_entities junction table when available, with a fallback
+ * to the denormalized entity_name column.
+ *
+ * @param entityName  The entity name to compute metrics for.
+ */
+export async function getEntityMetrics(entityName: string): Promise<EntityDossierMetrics> {
+  const zero: EntityDossierMetrics = {
+    signalsTotal: 0, signals24h: 0, signals7d: 0, signals30d: 0,
+    eventsTotal: 0, avgConfidence: 0, firstSeen: null, lastActivity: null,
+  };
+
+  try {
+    const hasJunction = await tableExists('signal_entities');
+
+    if (hasJunction) {
+      type MetricRow = {
+        total: string;
+        h24: string;
+        d7: string;
+        d30: string;
+        avg_conf: string | null;
+        first_seen: string | null;
+        last_activity: string | null;
+      };
+
+      const [row] = await dbQuery<MetricRow>`
+        SELECT
+          COUNT(*)::text AS total,
+          COUNT(*) FILTER (WHERE s.created_at > NOW() - INTERVAL '24 hours')::text AS h24,
+          COUNT(*) FILTER (WHERE s.created_at > NOW() - INTERVAL '7 days')::text AS d7,
+          COUNT(*) FILTER (WHERE s.created_at > NOW() - INTERVAL '30 days')::text AS d30,
+          AVG(COALESCE(s.confidence, 50))::numeric(5,1)::text AS avg_conf,
+          MIN(s.created_at)::text AS first_seen,
+          MAX(s.created_at)::text AS last_activity
+        FROM signals s
+        JOIN signal_entities se ON se.signal_id = s.id
+        JOIN entities e ON e.id = se.entity_id
+        WHERE e.name = ${entityName}
+      `;
+
+      const [evtRow] = await dbQuery<{ count: string }>`
+        SELECT COUNT(*)::text AS count
+        FROM events
+        WHERE entity_name = ${entityName}
+      `;
+
+      if (!row) return zero;
+
+      return {
+        signalsTotal: parseInt(row.total, 10) || 0,
+        signals24h: parseInt(row.h24, 10) || 0,
+        signals7d: parseInt(row.d7, 10) || 0,
+        signals30d: parseInt(row.d30, 10) || 0,
+        eventsTotal: parseInt(evtRow?.count ?? '0', 10) || 0,
+        avgConfidence: row.avg_conf != null ? parseFloat(row.avg_conf) : 0,
+        firstSeen: row.first_seen,
+        lastActivity: row.last_activity,
+      };
+    }
+
+    // Fallback: denormalized entity_name
+    type MetricRow = {
+      total: string;
+      h24: string;
+      d7: string;
+      d30: string;
+      avg_conf: string | null;
+      first_seen: string | null;
+      last_activity: string | null;
+    };
+
+    const [row] = await dbQuery<MetricRow>`
+      SELECT
+        COUNT(*)::text AS total,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::text AS h24,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::text AS d7,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::text AS d30,
+        AVG(COALESCE(confidence, 50))::numeric(5,1)::text AS avg_conf,
+        MIN(created_at)::text AS first_seen,
+        MAX(created_at)::text AS last_activity
+      FROM signals
+      WHERE entity_name = ${entityName}
+    `;
+
+    const [evtRow] = await dbQuery<{ count: string }>`
+      SELECT COUNT(*)::text AS count
+      FROM events
+      WHERE entity_name = ${entityName}
+    `;
+
+    if (!row) return zero;
+
+    return {
+      signalsTotal: parseInt(row.total, 10) || 0,
+      signals24h: parseInt(row.h24, 10) || 0,
+      signals7d: parseInt(row.d7, 10) || 0,
+      signals30d: parseInt(row.d30, 10) || 0,
+      eventsTotal: parseInt(evtRow?.count ?? '0', 10) || 0,
+      avgConfidence: row.avg_conf != null ? parseFloat(row.avg_conf) : 0,
+      firstSeen: row.first_seen,
+      lastActivity: row.last_activity,
+    };
+  } catch {
+    return zero;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Comparison
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Per-entity comparison data returned by getEntityComparison. */
+export interface EntityComparisonEntry {
+  name: string;
+  slug: string;
+  sector: string | null;
+  country: string | null;
+  signals24h: number;
+  signals7d: number;
+  signals30d: number;
+  signalsTotal: number;
+  eventsTotal: number;
+  avgConfidence: number;
+  lastActivity: string | null;
+  recentSignals: Signal[];
+  recentEvents: AiEvent[];
+}
+
+/**
+ * Fetch comparison data for 2–4 entities in parallel.
+ *
+ * Resolves each entity by slug, then fetches metrics, recent signals,
+ * and recent events concurrently.  Unknown slugs are silently skipped.
+ *
+ * @param entitySlugs  Array of entity URL slugs (2–4 items).
+ */
+export async function getEntityComparison(
+  entitySlugs: string[],
+): Promise<EntityComparisonEntry[]> {
+  const { slugify } = await import('@/utils/sanitize');
+  const safeSlugs = entitySlugs.slice(0, 4);
+
+  // Resolve all entities by slug
+  const entities = await Promise.all(
+    safeSlugs.map((slug) => getEntityBySlug(slug).catch(() => null)),
+  );
+
+  // Build comparison entries for found entities
+  const results = await Promise.all(
+    entities.map(async (entity): Promise<EntityComparisonEntry | null> => {
+      if (!entity) return null;
+
+      const [metrics, signals, events] = await Promise.all([
+        getEntityMetrics(entity.name).catch(() => ({
+          signalsTotal: 0, signals24h: 0, signals7d: 0, signals30d: 0,
+          eventsTotal: 0, avgConfidence: 0, firstSeen: null, lastActivity: null,
+        })),
+        getSignalsForEntity(entity.name, 3).catch(() => [] as Signal[]),
+        getEventsForEntity(entity.name, 3).catch(() => [] as AiEvent[]),
+      ]);
+
+      return {
+        name: entity.name,
+        slug: slugify(entity.name),
+        sector: entity.sector ?? null,
+        country: entity.country ?? null,
+        signals24h: metrics.signals24h,
+        signals7d: metrics.signals7d,
+        signals30d: metrics.signals30d,
+        signalsTotal: metrics.signalsTotal,
+        eventsTotal: metrics.eventsTotal,
+        avgConfidence: metrics.avgConfidence,
+        lastActivity: metrics.lastActivity,
+        recentSignals: signals,
+        recentEvents: events,
+      };
+    }),
+  );
+
+  return results.filter((r): r is EntityComparisonEntry => r !== null);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Articles
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -535,6 +1228,197 @@ type ArticleCat = Article['cat'];
 const ARTICLE_CATS: ArticleCat[] = ['funding', 'models', 'agents', 'regulation', 'research', 'product'];
 function isArticleCat(v: string): v is ArticleCat {
   return ARTICLE_CATS.includes(v as ArticleCat);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Source Provenance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lightweight article provenance record for display in signal detail pages. */
+export interface SourceArticle {
+  title: string;
+  sourceName: string;
+  url: string;
+  publishedAt: string;
+}
+
+/**
+ * Fetch the source articles that contributed evidence to a signal.
+ *
+ * Follows the chain: signal → supporting events → articles,
+ * collecting the distinct articles referenced by the signal's events.
+ *
+ * @param signalId    The signal to look up provenance for.
+ * @param entityName  Fallback entity name for broader event matching.
+ * @param limit       Maximum articles to return (default 10).
+ */
+export async function getSourceArticlesForSignal(
+  signalId: string,
+  entityName: string,
+  limit = 10,
+): Promise<SourceArticle[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const rows = await dbQuery<ArticleRow>`
+      WITH signal_events AS (
+        -- Events directly linked via supporting_events array
+        SELECT e.source_article_id
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+          AND e.source_article_id IS NOT NULL
+        UNION
+        -- Events that back-reference this signal
+        SELECT e.source_article_id
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+          AND e.source_article_id IS NOT NULL
+        UNION
+        -- Fallback: entity-based events within 90 days
+        SELECT e.source_article_id
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.source_article_id IS NOT NULL
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      )
+      SELECT DISTINCT a.id, a.title, a.source, a.url, a.published_at, a.category, a.created_at
+      FROM articles a
+      INNER JOIN signal_events se ON a.id = se.source_article_id
+      ORDER BY a.published_at DESC
+      LIMIT ${safeLimit}
+    `;
+
+    return rows.map((row) => ({
+      title: row.title,
+      sourceName: row.source,
+      url: row.url,
+      publishedAt: new Date(row.published_at).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Compute momentum data for a signal by counting supporting events
+ * in two 7-day windows: recent (last 7 days) and previous (8–14 days ago).
+ *
+ * Uses the same 3-strategy event resolution as getSupportingEventsForSignal:
+ *   1. Direct linkage via signals.supporting_events[]
+ *   2. Back-reference via events.signal_ids[]
+ *   3. Entity fallback for events sharing the same entity_name
+ *
+ * Returns { recentCount, previousCount } or null if the query fails.
+ */
+export async function getSignalMomentum(
+  signalId: string,
+  entityName: string,
+): Promise<{ recentCount: number; previousCount: number } | null> {
+  try {
+    const rows = await dbQuery<{ recent_count: string; previous_count: string }>`
+      WITH signal_events AS (
+        -- Strategy 1: Direct linkage
+        SELECT e.timestamp
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+        UNION
+        -- Strategy 2: Back-reference
+        SELECT e.timestamp
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+        UNION
+        -- Strategy 3: Entity fallback (90-day window)
+        SELECT e.timestamp
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      )
+      SELECT
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
+        ) AS recent_count,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '14 days'
+            AND timestamp < NOW() - INTERVAL '7 days'
+        ) AS previous_count
+      FROM signal_events
+    `;
+
+    if (rows.length === 0) return { recentCount: 0, previousCount: 0 };
+
+    return {
+      recentCount: parseInt(rows[0].recent_count, 10) || 0,
+      previousCount: parseInt(rows[0].previous_count, 10) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Batch-compute momentum data for multiple signals in a single query.
+ *
+ * Uses direct linkage (signals.supporting_events[]) and back-reference
+ * (events.signal_ids[]) strategies. Skips entity fallback for efficiency
+ * in batch contexts — detail pages use the full resolution via getSignalMomentum.
+ *
+ * Returns a Map keyed by signal ID with { recentCount, previousCount }.
+ */
+export async function getSignalsMomentumBatch(
+  signalIds: string[],
+): Promise<Map<string, { recentCount: number; previousCount: number }>> {
+  const result = new Map<string, { recentCount: number; previousCount: number }>();
+  if (signalIds.length === 0) return result;
+
+  try {
+    const rows = await dbQuery<{
+      signal_id: string;
+      recent_count: string;
+      previous_count: string;
+    }>`
+      WITH signal_event_pairs AS (
+        -- Strategy 1: Direct linkage
+        SELECT s.id AS signal_id, e.timestamp
+        FROM signals s
+        INNER JOIN events e ON e.id = ANY(s.supporting_events)
+        WHERE s.id = ANY(${signalIds}::text[])
+        UNION
+        -- Strategy 2: Back-reference
+        SELECT unnest(e.signal_ids) AS signal_id, e.timestamp
+        FROM events e
+        WHERE e.signal_ids && ${signalIds}::text[]
+      )
+      SELECT
+        signal_id,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
+        ) AS recent_count,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '14 days'
+            AND timestamp < NOW() - INTERVAL '7 days'
+        ) AS previous_count
+      FROM signal_event_pairs
+      WHERE signal_id = ANY(${signalIds}::text[])
+      GROUP BY signal_id
+    `;
+
+    for (const row of rows) {
+      result.set(row.signal_id, {
+        recentCount: parseInt(row.recent_count, 10) || 0,
+        previousCount: parseInt(row.previous_count, 10) || 0,
+      });
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
 }
 
 /**
@@ -1002,4 +1886,575 @@ export async function getSignalContextsByStatus(
   `;
 
   return rows.map(rowToSignalContext);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ecosystem Activity Snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Entity with aggregated signal count for the "most active" ranking. */
+export interface ActiveEntity {
+  name: string;
+  signalCount: number;
+}
+
+/**
+ * High-level ecosystem activity snapshot used by the intelligence feed
+ * overview section.  Structured for future expansion (weekly summaries,
+ * momentum indicators, heatmaps, trend detection).
+ */
+export interface EcosystemSnapshot {
+  /** Top signals by significance + recency (max 5). */
+  topSignals: Signal[];
+  /** Entities ranked by recent signal volume (max 8). */
+  mostActiveEntities: ActiveEntity[];
+  /** Most recent funding rounds (max 5). */
+  recentFunding: FundingRound[];
+  /** Most recent model releases (max 5). */
+  modelReleases: AIModel[];
+}
+
+const EMPTY_SNAPSHOT: EcosystemSnapshot = {
+  topSignals: [],
+  mostActiveEntities: [],
+  recentFunding: [],
+  modelReleases: [],
+};
+
+/**
+ * Compute an ecosystem activity snapshot from the database.
+ *
+ * Each sub-query is independent and fails gracefully so a single missing
+ * table never breaks the entire snapshot.  The function is designed for
+ * extension — future callers can add timeRange, groupBy, or momentum
+ * parameters without changing the return shape.
+ */
+export async function getEcosystemActivitySnapshot(): Promise<EcosystemSnapshot> {
+  try {
+    const [topSignals, mostActiveEntities, recentFunding, modelReleases] =
+      await Promise.all([
+        // ── Top signals (significance + recency) ──────────────────────
+        getSignals(5, 'standard').catch(() => [] as Signal[]),
+
+        // ── Most active entities by signal count ──────────────────────
+        (async (): Promise<ActiveEntity[]> => {
+          try {
+            type Row = { entity_name: string; signal_count: string };
+            const rows = await dbQuery<Row>`
+              SELECT entity_name, COUNT(*)::text AS signal_count
+              FROM signals
+              WHERE entity_name IS NOT NULL
+                AND entity_name != ''
+                AND (status IS NULL OR status NOT IN ('rejected'))
+              GROUP BY entity_name
+              ORDER BY COUNT(*) DESC
+              LIMIT 8
+            `;
+            return rows.map((r) => ({
+              name: r.entity_name,
+              signalCount: parseInt(r.signal_count, 10) || 0,
+            }));
+          } catch {
+            return [];
+          }
+        })(),
+
+        // ── Recent funding rounds ─────────────────────────────────────
+        getFundingRounds(5).catch(() => [] as FundingRound[]),
+
+        // ── Model releases ────────────────────────────────────────────
+        getModels(5).catch(() => [] as AIModel[]),
+      ]);
+
+    return { topSignals, mostActiveEntities, recentFunding, modelReleases };
+  } catch {
+    return EMPTY_SNAPSHOT;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alerts
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AlertRow {
+  id: string;
+  user_id: string | null;
+  type: string;
+  entity_name: string | null;
+  signal_id: string | null;
+  trend_id: string | null;
+  title: string;
+  message: string;
+  priority: number;
+  created_at: string;
+  read: boolean;
+}
+
+export interface AlertRecord {
+  id: string;
+  userId: string | null;
+  type: string;
+  entityName: string | null;
+  signalId: string | null;
+  trendId: string | null;
+  title: string;
+  message: string;
+  priority: number;
+  createdAt: string;
+  read: boolean;
+}
+
+function mapAlertRow(row: AlertRow): AlertRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    entityName: row.entity_name,
+    signalId: row.signal_id,
+    trendId: row.trend_id,
+    title: row.title,
+    message: row.message,
+    priority: row.priority ?? 1,
+    createdAt: row.created_at,
+    read: row.read,
+  };
+}
+
+/**
+ * Fetch recent alerts ordered by priority (high first), then creation time.
+ * Optionally filter to only alerts created after `since` timestamp.
+ *
+ * When `userId` is provided, returns:
+ *   - platform alerts (user_id IS NULL)
+ *   - personal alerts where user_id matches
+ * When `userId` is omitted, returns only platform alerts (user_id IS NULL).
+ */
+export async function getAlerts(limit = 20, since?: string, userId?: string): Promise<AlertRecord[]> {
+  if (!(await tableExists('alerts'))) return [];
+
+  if (userId && since) {
+    const rows = await dbQuery<AlertRow>`
+      SELECT id, user_id, type, entity_name, signal_id, trend_id,
+             title, message, priority, created_at, read
+      FROM alerts
+      WHERE created_at > ${since}
+        AND (user_id IS NULL OR user_id = ${userId})
+      ORDER BY priority DESC, created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(mapAlertRow);
+  }
+
+  if (userId) {
+    const rows = await dbQuery<AlertRow>`
+      SELECT id, user_id, type, entity_name, signal_id, trend_id,
+             title, message, priority, created_at, read
+      FROM alerts
+      WHERE (user_id IS NULL OR user_id = ${userId})
+      ORDER BY priority DESC, created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(mapAlertRow);
+  }
+
+  if (since) {
+    const rows = await dbQuery<AlertRow>`
+      SELECT id, user_id, type, entity_name, signal_id, trend_id,
+             title, message, priority, created_at, read
+      FROM alerts
+      WHERE created_at > ${since} AND user_id IS NULL
+      ORDER BY priority DESC, created_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map(mapAlertRow);
+  }
+
+  const rows = await dbQuery<AlertRow>`
+    SELECT id, user_id, type, entity_name, signal_id, trend_id,
+           title, message, priority, created_at, read
+    FROM alerts
+    WHERE user_id IS NULL
+    ORDER BY priority DESC, created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(mapAlertRow);
+}
+
+/**
+ * Count unread alerts visible to the given user.
+ * Includes platform alerts (user_id IS NULL) and personal alerts for this user.
+ */
+export async function getUnreadAlertCount(userId?: string): Promise<number> {
+  if (!(await tableExists('alerts'))) return 0;
+
+  if (userId) {
+    const rows = await dbQuery<{ count: string }>`
+      SELECT COUNT(*) AS count FROM alerts
+      WHERE read = false AND (user_id IS NULL OR user_id = ${userId})
+    `;
+    return parseInt(rows[0]?.count ?? '0', 10);
+  }
+
+  const rows = await dbQuery<{ count: string }>`
+    SELECT COUNT(*) AS count FROM alerts WHERE read = false AND user_id IS NULL
+  `;
+  return parseInt(rows[0]?.count ?? '0', 10);
+}
+
+/**
+ * Mark a single alert as read.
+ */
+export async function markAlertRead(id: string): Promise<void> {
+  await dbQuery`UPDATE alerts SET read = true WHERE id = ${id}`;
+}
+
+/**
+ * Mark all alerts visible to the given user as read.
+ * Platform alerts (user_id IS NULL) + personal alerts for this user.
+ */
+export async function markAllAlertsRead(userId?: string): Promise<void> {
+  if (userId) {
+    await dbQuery`UPDATE alerts SET read = true WHERE read = false AND (user_id IS NULL OR user_id = ${userId})`;
+  } else {
+    await dbQuery`UPDATE alerts SET read = true WHERE read = false AND user_id IS NULL`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Watchlists (migration 011)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WatchlistRow {
+  id: number;
+  user_id: string;
+  entity_slug: string;
+  entity_name: string;
+  sector: string | null;
+  country: string | null;
+  created_at: string;
+}
+
+export interface WatchlistEntity {
+  slug: string;
+  name: string;
+  sector?: string;
+  country?: string;
+  addedAt: string;
+}
+
+function rowToWatchlistEntity(row: WatchlistRow): WatchlistEntity {
+  return {
+    slug: row.entity_slug,
+    name: row.entity_name,
+    ...(row.sector ? { sector: row.sector } : {}),
+    ...(row.country ? { country: row.country } : {}),
+    addedAt: row.created_at,
+  };
+}
+
+/**
+ * Fetch all watched entities for a user, ordered by most recently added.
+ */
+export async function getWatchlistForUser(userId: string): Promise<WatchlistEntity[]> {
+  if (!(await tableExists('user_watchlists'))) return [];
+
+  const rows = await dbQuery<WatchlistRow>`
+    SELECT id, user_id, entity_slug, entity_name, sector, country, created_at
+    FROM user_watchlists
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToWatchlistEntity);
+}
+
+/**
+ * Add an entity to a user's watchlist.
+ * Safely handles duplicates via ON CONFLICT DO NOTHING.
+ */
+export async function addWatchlistEntity(
+  userId: string,
+  entitySlug: string,
+  entityName: string,
+  sector?: string,
+  country?: string,
+): Promise<void> {
+  await dbQuery`
+    INSERT INTO user_watchlists (user_id, entity_slug, entity_name, sector, country)
+    VALUES (${userId}, ${entitySlug}, ${entityName}, ${sector ?? null}, ${country ?? null})
+    ON CONFLICT (user_id, entity_slug) DO NOTHING
+  `;
+}
+
+/**
+ * Remove an entity from a user's watchlist.
+ */
+export async function removeWatchlistEntity(
+  userId: string,
+  entitySlug: string,
+): Promise<void> {
+  await dbQuery`
+    DELETE FROM user_watchlists
+    WHERE user_id = ${userId} AND entity_slug = ${entitySlug}
+  `;
+}
+
+/**
+ * Check whether a specific entity is on a user's watchlist.
+ */
+export async function isEntityWatched(
+  userId: string,
+  entitySlug: string,
+): Promise<boolean> {
+  if (!(await tableExists('user_watchlists'))) return false;
+
+  const rows = await dbQuery<{ exists: boolean }>`
+    SELECT EXISTS(
+      SELECT 1 FROM user_watchlists
+      WHERE user_id = ${userId} AND entity_slug = ${entitySlug}
+    ) AS exists
+  `;
+  return rows[0]?.exists === true;
+}
+
+/**
+ * Bulk-import watchlist entities for a user (e.g. migrating from localStorage).
+ * Skips duplicates via ON CONFLICT DO NOTHING.
+ */
+export async function bulkImportWatchlist(
+  userId: string,
+  entities: Array<{ slug: string; name: string; sector?: string; country?: string; addedAt?: string }>,
+): Promise<number> {
+  if (entities.length === 0) return 0;
+
+  let imported = 0;
+  for (const entity of entities) {
+    const rows = await dbQuery<{ id: number }>`
+      INSERT INTO user_watchlists (user_id, entity_slug, entity_name, sector, country, created_at)
+      VALUES (
+        ${userId},
+        ${entity.slug},
+        ${entity.name},
+        ${entity.sector ?? null},
+        ${entity.country ?? null},
+        ${entity.addedAt ?? new Date().toISOString()}
+      )
+      ON CONFLICT (user_id, entity_slug) DO NOTHING
+      RETURNING id
+    `;
+    if (rows.length > 0) imported++;
+  }
+  return imported;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Watchlist → Alert targeting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Find all user IDs that are watching a given entity name.
+ * Used by personal alert generation to target relevant users.
+ */
+export async function getUsersWatchingEntityName(entityName: string): Promise<string[]> {
+  if (!(await tableExists('user_watchlists'))) return [];
+
+  const rows = await dbQuery<{ user_id: string }>`
+    SELECT DISTINCT user_id FROM user_watchlists
+    WHERE LOWER(entity_name) = LOWER(${entityName})
+  `;
+  return rows.map((r) => r.user_id);
+}
+
+/**
+ * Find all user IDs watching any of the given entity names.
+ * Returns a map: entityName → [userId1, userId2, ...]
+ */
+export async function getUsersWatchingEntityNames(entityNames: string[]): Promise<Map<string, string[]>> {
+  const result = new Map<string, string[]>();
+  if (entityNames.length === 0) return result;
+  if (!(await tableExists('user_watchlists'))) return result;
+
+  const rows = await dbQuery<{ user_id: string; entity_name: string }>`
+    SELECT DISTINCT user_id, entity_name FROM user_watchlists
+    WHERE LOWER(entity_name) = ANY(${entityNames.map((n) => n.toLowerCase())})
+  `;
+  for (const row of rows) {
+    const key = row.entity_name;
+    if (!result.has(key)) result.set(key, []);
+    result.get(key)!.push(row.user_id);
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email Digest Subscriptions (migration 012)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EmailSubscription {
+  userId: string;
+  email: string;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface EmailSubscriptionRow {
+  user_id: string;
+  email: string;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapEmailSubRow(row: EmailSubscriptionRow): EmailSubscription {
+  return {
+    userId: row.user_id,
+    email: row.email,
+    isEnabled: row.is_enabled,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Get the email digest subscription for a user, if any.
+ */
+export async function getEmailSubscription(userId: string): Promise<EmailSubscription | null> {
+  if (!(await tableExists('user_email_subscriptions'))) return null;
+
+  const rows = await dbQuery<EmailSubscriptionRow>`
+    SELECT user_id, email, is_enabled, created_at, updated_at
+    FROM user_email_subscriptions
+    WHERE user_id = ${userId}
+    LIMIT 1
+  `;
+  return rows.length > 0 ? mapEmailSubRow(rows[0]) : null;
+}
+
+/**
+ * Create or update an email digest subscription.
+ * Uses ON CONFLICT on user_id to upsert.
+ */
+export async function upsertEmailSubscription(
+  userId: string,
+  email: string,
+  isEnabled = true,
+): Promise<void> {
+  await dbQuery`
+    INSERT INTO user_email_subscriptions (user_id, email, is_enabled, updated_at)
+    VALUES (${userId}, ${email}, ${isEnabled}, NOW())
+    ON CONFLICT (user_id) DO UPDATE SET
+      email = EXCLUDED.email,
+      is_enabled = EXCLUDED.is_enabled,
+      updated_at = NOW()
+  `;
+}
+
+/**
+ * Get all enabled email subscriptions (for digest delivery).
+ */
+export async function getEnabledEmailSubscriptions(): Promise<EmailSubscription[]> {
+  if (!(await tableExists('user_email_subscriptions'))) return [];
+
+  const rows = await dbQuery<EmailSubscriptionRow>`
+    SELECT user_id, email, is_enabled, created_at, updated_at
+    FROM user_email_subscriptions
+    WHERE is_enabled = TRUE
+  `;
+  return rows.map(mapEmailSubRow);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Digest Alert Queries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Personal digest alert types — alerts tied to watched entities. */
+const PERSONAL_DIGEST_TYPES = [
+  'watched_entity_high_impact',
+  'watched_entity_rising',
+  'watched_entity_trend',
+];
+
+/** Platform digest alert types — broad intelligence signals. */
+const PLATFORM_DIGEST_TYPES = [
+  'signal_high_impact',
+  'trend_detected',
+  'signal_rising_momentum',
+  'trend_rising',
+];
+
+/**
+ * Fetch personal (watched-entity) alerts for a user since a given timestamp.
+ * Used to build the "Your watched entities" section of the digest email.
+ */
+export async function getDigestAlertsForUser(
+  userId: string,
+  since: string,
+): Promise<AlertRecord[]> {
+  if (!(await tableExists('alerts'))) return [];
+
+  const rows = await dbQuery<AlertRow>`
+    SELECT id, user_id, type, entity_name, signal_id, trend_id,
+           title, message, priority, created_at, read
+    FROM alerts
+    WHERE user_id = ${userId}
+      AND type = ANY(${PERSONAL_DIGEST_TYPES})
+      AND created_at > ${since}
+    ORDER BY priority DESC, created_at DESC
+    LIMIT 50
+  `;
+  return rows.map(mapAlertRow);
+}
+
+/**
+ * Fetch top platform alerts since a given timestamp.
+ * Used to build the "Platform intelligence" section of the digest email.
+ */
+export async function getTopPlatformDigestAlerts(
+  since: string,
+  limit = 15,
+): Promise<AlertRecord[]> {
+  if (!(await tableExists('alerts'))) return [];
+
+  const rows = await dbQuery<AlertRow>`
+    SELECT id, user_id, type, entity_name, signal_id, trend_id,
+           title, message, priority, created_at, read
+    FROM alerts
+    WHERE user_id IS NULL
+      AND type = ANY(${PLATFORM_DIGEST_TYPES})
+      AND created_at > ${since}
+    ORDER BY priority DESC, created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(mapAlertRow);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Digest Send Tracking (migration 013)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Check if a digest has already been sent to a user for a given date.
+ */
+export async function hasDigestBeenSent(userId: string, forDate: string): Promise<boolean> {
+  if (!(await tableExists('digest_sends'))) return false;
+
+  const rows = await dbQuery<{ exists: boolean }>`
+    SELECT EXISTS(
+      SELECT 1 FROM digest_sends
+      WHERE user_id = ${userId} AND sent_for_date = ${forDate}
+    ) AS exists
+  `;
+  return rows[0]?.exists === true;
+}
+
+/**
+ * Record that a digest was sent to a user for a given date.
+ * Uses ON CONFLICT to prevent duplicate records.
+ */
+export async function recordDigestSend(userId: string, forDate: string): Promise<void> {
+  await dbQuery`
+    INSERT INTO digest_sends (user_id, sent_for_date)
+    VALUES (${userId}, ${forDate})
+    ON CONFLICT (user_id, sent_for_date) DO NOTHING
+  `;
 }

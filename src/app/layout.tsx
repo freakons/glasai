@@ -6,6 +6,8 @@ import { Topbar } from '@/components/layout/Topbar';
 import { Ticker } from '@/components/layout/Ticker';
 import { Footer } from '@/components/layout/Footer';
 import { AmbientBackground } from '@/components/layout/AmbientBackground';
+import { OnboardingProvider } from '@/components/onboarding/OnboardingProvider';
+import { CommandPaletteProvider } from '@/components/command/CommandPaletteProvider';
 import '@/styles/globals.css';
 
 const instrumentSerif = localFont({
@@ -60,7 +62,7 @@ export const metadata: Metadata = {
   },
   robots: { index: true, follow: true },
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%234f46e5'/><stop offset='100%25' stop-color='%2306b6d4'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><text y='22' x='5' font-size='14' font-family='Georgia,serif' fill='white' font-weight='900'>OM</text></svg>",
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'><stop offset='0%25' stop-color='%234f46e5'/><stop offset='100%25' stop-color='%2306b6d4'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><text y='22' x='5' font-size='14' font-family='Georgia,serif' fill='white' font-weight='900'>Om</text></svg>",
   },
 };
 
@@ -71,18 +73,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="theme-color" content="#05050f" />
       </head>
       <body>
-        <AmbientBackground />
-        <div className="app">
-          <Sidebar />
-          <main className="main-content">
-            <Topbar title="OM" highlight="Terminal" />
-            <Ticker />
-            <div className="content page-enter">
-              {children}
-            </div>
-          </main>
-        </div>
-        <Footer />
+        <CommandPaletteProvider>
+          <AmbientBackground />
+          <div className="app">
+            <Sidebar />
+            <main className="main-content">
+              <Topbar title="Om" highlight="terminal" />
+              <Ticker />
+              <div className="content page-enter">
+                {children}
+              </div>
+            </main>
+          </div>
+          <Footer />
+          <OnboardingProvider />
+        </CommandPaletteProvider>
       </body>
     </html>
   );

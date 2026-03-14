@@ -373,6 +373,89 @@ const STATEMENTS = [
   // Composite index for significance + recency tie-breaking.
   `CREATE INDEX IF NOT EXISTS idx_signals_significance_created_at
      ON signals (significance_score DESC NULLS LAST, created_at DESC)`,
+
+  // ── Migration 009: Personal Intelligence Alerts ────────────────────────
+  `CREATE TABLE IF NOT EXISTS alerts (
+    id          TEXT        PRIMARY KEY,
+    user_id     TEXT,
+    type        TEXT        NOT NULL CHECK (type IN (
+                              'signal_high_impact',
+                              'signal_momentum',
+                              'entity_watch',
+                              'trend_detected'
+                            )),
+    entity_name TEXT,
+    signal_id   TEXT,
+    trend_id    TEXT,
+    title       TEXT        NOT NULL,
+    message     TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read        BOOLEAN     NOT NULL DEFAULT FALSE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts (created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_read       ON alerts (read)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_type       ON alerts (type)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_user_id    ON alerts (user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_signal_id  ON alerts (signal_id)`,
+
+  // ── Migration 010: Alert System Refinement ────────────────────────────
+  `ALTER TABLE alerts ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE alerts DROP CONSTRAINT IF EXISTS alerts_type_check`,
+  `ALTER TABLE alerts ADD CONSTRAINT alerts_type_check CHECK (type IN (
+    'signal_high_impact',
+    'signal_rising_momentum',
+    'trend_detected',
+    'trend_rising',
+    'entity_watch',
+    'trend_watch',
+    'category_watch',
+    'watched_entity_high_impact',
+    'watched_entity_rising',
+    'watched_entity_trend'
+  ))`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_priority ON alerts (priority DESC, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_dedup_signal ON alerts (type, signal_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_alerts_dedup_trend  ON alerts (type, trend_id, created_at DESC)`,
+  `UPDATE alerts SET type = 'signal_rising_momentum' WHERE type = 'signal_momentum'`,
+
+  // ── Migration 011: Server-side persistent watchlists ────────────────────
+  `CREATE TABLE IF NOT EXISTS user_watchlists (
+    id           SERIAL       PRIMARY KEY,
+    user_id      TEXT         NOT NULL,
+    entity_slug  TEXT         NOT NULL,
+    entity_name  TEXT         NOT NULL,
+    sector       TEXT,
+    country      TEXT,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_watchlists_user_entity
+     ON user_watchlists (user_id, entity_slug)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_watchlists_user_id
+     ON user_watchlists (user_id, created_at DESC)`,
+
+  // ── Migration 012: Email Digest Subscriptions ──────────────────────────
+  `CREATE TABLE IF NOT EXISTS user_email_subscriptions (
+    id         SERIAL       PRIMARY KEY,
+    user_id    TEXT         NOT NULL UNIQUE,
+    email      TEXT         NOT NULL,
+    is_enabled BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_email_subs_user_id
+     ON user_email_subscriptions (user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_email_subs_enabled
+     ON user_email_subscriptions (is_enabled) WHERE is_enabled = TRUE`,
+
+  // ── Migration 013: Digest Send Tracking ────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS digest_sends (
+    id            SERIAL       PRIMARY KEY,
+    user_id       TEXT         NOT NULL,
+    sent_for_date DATE         NOT NULL,
+    sent_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_digest_sends_user_date
+     ON digest_sends (user_id, sent_for_date)`,
 ];
 
 /**
@@ -429,6 +512,13 @@ const TABLES_CREATED = [
   'signals.significance_score (column)',
   'signals.source_support_count (column)',
   'signals — significance indexes (significance_score, significance_score+created_at)',
+  // migration 009
+  'alerts',
+  // migration 011
+  'user_watchlists',
+  // migration 012
+  'user_email_subscriptions',
+  'digest_sends',
 ];
 
 export async function POST(req: NextRequest) {

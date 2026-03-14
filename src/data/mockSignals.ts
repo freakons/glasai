@@ -45,6 +45,11 @@ export interface Signal {
    * Null for signals written before migration 008.
    */
   sourceSupportCount?: number | null;
+  /**
+   * Momentum activity counts for the signal.
+   * Present when computed by batch or detail queries; undefined otherwise.
+   */
+  momentum?: { recentCount: number; previousCount: number } | null;
 }
 
 export const MOCK_SIGNALS: Signal[] = [
