@@ -11,6 +11,7 @@ import {
 import type { TimelineItem } from '@/db/queries';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { WatchlistButton } from '@/components/watchlist/WatchlistButton';
+import { EntityTimeline } from '@/components/entity/TimelineNavigator';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -229,66 +230,7 @@ export default async function EntityDossierPage(
       {/* Entity Timeline */}
       <div style={{ ...GLASS_CARD, marginBottom: 16 }}>
         <div style={SECTION_HEADER}>Entity Timeline</div>
-
-        {timeline.length === 0 ? (
-          <p style={EMPTY_TEXT}>No timeline activity available yet.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {timeline.map((item) => (
-              <Link
-                key={`${item.type}-${item.id}`}
-                href={item.href}
-                style={{
-                  display: 'block',
-                  padding: '12px 0 12px 12px',
-                  borderBottom: '1px solid var(--border)',
-                  borderLeft: `2px solid ${item.type === 'signal' ? 'var(--cyan-l)' : 'var(--amber-l)'}`,
-                  textDecoration: 'none',
-                  transition: 'background 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{
-                    fontFamily: 'var(--fm)', fontSize: 8, letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    padding: '1px 6px', borderRadius: 8,
-                    color: item.type === 'signal' ? 'var(--cyan-l)' : 'var(--amber-l)',
-                    border: `1px solid ${item.type === 'signal' ? 'rgba(6,182,212,0.4)' : 'rgba(217,119,6,0.4)'}`,
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {item.type}
-                  </span>
-                  <span style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>
-                    {item.title}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <span style={{
-                    fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em',
-                    textTransform: 'uppercase', color: 'var(--text3)',
-                    padding: '2px 8px', borderRadius: 10,
-                    border: '1px solid var(--border2)',
-                  }}>
-                    {item.category}
-                  </span>
-                  <span style={{ fontFamily: 'var(--fm)', fontSize: 10, color: 'var(--text3)' }}>
-                    {formatDate(item.timestamp)}
-                  </span>
-                  {item.confidence != null && item.confidence >= 80 && (
-                    <span style={{ fontFamily: 'var(--fm)', fontSize: 9, color: 'var(--emerald-l)' }}>
-                      {item.confidence}%
-                    </span>
-                  )}
-                  {item.amount && (
-                    <span style={{ fontFamily: 'var(--fm)', fontSize: 9, color: 'var(--amber-l)' }}>
-                      {item.amount}
-                    </span>
-                  )}
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+        <EntityTimeline timeline={timeline} />
       </div>
 
       {/* Main content grid */}
@@ -474,7 +416,7 @@ export default async function EntityDossierPage(
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={EMPTY_TEXT}>Related entities graph</span>
               <span style={EMPTY_TEXT}>Funding history</span>
-              <span style={EMPTY_TEXT}>Timeline filters &amp; grouping</span>
+              <span style={EMPTY_TEXT}>Timeline grouping &amp; date ranges</span>
             </div>
           </div>
         </div>
