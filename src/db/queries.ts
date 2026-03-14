@@ -522,6 +522,74 @@ export async function getRelatedSignals(
 }
 
 /**
+ * Fetch supporting events for a given signal.
+ *
+ * Resolution order (results are merged and deduplicated):
+ *   1. Direct linkage — events whose IDs are in signals.supporting_events[]
+ *   2. Back-reference — events whose signal_ids[] contain this signal ID
+ *   3. Entity fallback — events sharing the same entity_name, within 90 days
+ *
+ * Returns an empty array when no evidence can be found.
+ *
+ * @param signalId    The signal to find evidence for.
+ * @param entityName  The signal's entity name (used for fallback matching).
+ * @param limit       Maximum events to return (default 10).
+ */
+export async function getSupportingEventsForSignal(
+  signalId: string,
+  entityName: string,
+  limit = 10,
+): Promise<AiEvent[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    // Strategy: single query that UNIONs direct linkage, back-reference, and
+    // entity-based fallback, then deduplicates and limits.
+    const rows = await dbQuery<EventRow>`
+      WITH direct AS (
+        -- Events whose IDs are listed in signals.supporting_events[]
+        SELECT e.*
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+      ),
+      backref AS (
+        -- Events that reference this signal in their signal_ids[]
+        SELECT e.*
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+      ),
+      entity_match AS (
+        -- Fallback: events for the same entity within 90 days
+        SELECT e.*
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      ),
+      combined AS (
+        SELECT * FROM direct
+        UNION
+        SELECT * FROM backref
+        UNION
+        SELECT * FROM entity_match
+      )
+      SELECT
+        id, type, title, description,
+        entity_id, entity_name, company,
+        amount, signal_ids, timestamp, created_at
+      FROM combined
+      ORDER BY timestamp DESC
+      LIMIT ${safeLimit}
+    `;
+
+    return rows.map(rowToEvent);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch AI ecosystem events from the database.
  *
  * Reads from the `events` table populated by the ingestion pipeline.
