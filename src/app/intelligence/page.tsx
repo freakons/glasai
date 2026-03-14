@@ -1,9 +1,10 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
-import { getSignals, getSiteStats } from '@/db/queries';
+import { getSignals, getSiteStats, getEcosystemActivitySnapshot } from '@/db/queries';
 import { formatFundingTotal } from '@/lib/parseFundingAmount';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { IntelligenceFeed } from './IntelligenceFeed';
+import { EcosystemActivity } from './EcosystemActivity';
 import { CommandBar } from '@/ui/layout/CommandBar';
 import { composeFeed } from '@/lib/signals/feedComposer';
 
@@ -23,11 +24,12 @@ const STATS_FALLBACK = {
 };
 
 export default async function IntelligencePage() {
-  const [articles, featured, live, rawSignals] = await Promise.all([
+  const [articles, featured, live, rawSignals, snapshot] = await Promise.all([
     fetchArticles(),
     fetchFeaturedArticle(),
     getSiteStats().catch(() => STATS_FALLBACK),
     getSignals(50, 'standard').catch(() => []),
+    getEcosystemActivitySnapshot(),
   ]);
 
   // Compose the signal feed with diversity + dedup + ranking
@@ -64,6 +66,8 @@ export default async function IntelligencePage() {
         <StatCard value={regulations} label="Regulations" delta="Active" color="var(--rose-l)" glowColor="rgba(225,29,72,0.4)" />
         <StatCard value={sources} label="Sources" delta="Verified" color="var(--emerald-l)" glowColor="rgba(5,150,105,0.4)" />
       </div>
+
+      <EcosystemActivity snapshot={snapshot} />
 
       {featured && <FeaturedCard article={featured} />}
 

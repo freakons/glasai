@@ -1621,3 +1621,87 @@ export async function getSignalContextsByStatus(
 
   return rows.map(rowToSignalContext);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ecosystem Activity Snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Entity with aggregated signal count for the "most active" ranking. */
+export interface ActiveEntity {
+  name: string;
+  signalCount: number;
+}
+
+/**
+ * High-level ecosystem activity snapshot used by the intelligence feed
+ * overview section.  Structured for future expansion (weekly summaries,
+ * momentum indicators, heatmaps, trend detection).
+ */
+export interface EcosystemSnapshot {
+  /** Top signals by significance + recency (max 5). */
+  topSignals: Signal[];
+  /** Entities ranked by recent signal volume (max 8). */
+  mostActiveEntities: ActiveEntity[];
+  /** Most recent funding rounds (max 5). */
+  recentFunding: FundingRound[];
+  /** Most recent model releases (max 5). */
+  modelReleases: AIModel[];
+}
+
+const EMPTY_SNAPSHOT: EcosystemSnapshot = {
+  topSignals: [],
+  mostActiveEntities: [],
+  recentFunding: [],
+  modelReleases: [],
+};
+
+/**
+ * Compute an ecosystem activity snapshot from the database.
+ *
+ * Each sub-query is independent and fails gracefully so a single missing
+ * table never breaks the entire snapshot.  The function is designed for
+ * extension — future callers can add timeRange, groupBy, or momentum
+ * parameters without changing the return shape.
+ */
+export async function getEcosystemActivitySnapshot(): Promise<EcosystemSnapshot> {
+  try {
+    const [topSignals, mostActiveEntities, recentFunding, modelReleases] =
+      await Promise.all([
+        // ── Top signals (significance + recency) ──────────────────────
+        getSignals(5, 'standard').catch(() => [] as Signal[]),
+
+        // ── Most active entities by signal count ──────────────────────
+        (async (): Promise<ActiveEntity[]> => {
+          try {
+            type Row = { entity_name: string; signal_count: string };
+            const rows = await dbQuery<Row>`
+              SELECT entity_name, COUNT(*)::text AS signal_count
+              FROM signals
+              WHERE entity_name IS NOT NULL
+                AND entity_name != ''
+                AND (status IS NULL OR status NOT IN ('rejected'))
+              GROUP BY entity_name
+              ORDER BY COUNT(*) DESC
+              LIMIT 8
+            `;
+            return rows.map((r) => ({
+              name: r.entity_name,
+              signalCount: parseInt(r.signal_count, 10) || 0,
+            }));
+          } catch {
+            return [];
+          }
+        })(),
+
+        // ── Recent funding rounds ─────────────────────────────────────
+        getFundingRounds(5).catch(() => [] as FundingRound[]),
+
+        // ── Model releases ────────────────────────────────────────────
+        getModels(5).catch(() => [] as AIModel[]),
+      ]);
+
+    return { topSignals, mostActiveEntities, recentFunding, modelReleases };
+  } catch {
+    return EMPTY_SNAPSHOT;
+  }
+}
