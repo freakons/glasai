@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { getEventById, getSignalsForEvent } from '@/db/queries';
+import { slugify } from '@/utils/sanitize';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -111,7 +112,7 @@ export default async function EventDetailPage(
           </span>
           {event.entityName && (
             <Link
-              href={`/entity/${encodeURIComponent(event.entityName)}`}
+              href={`/entity/${slugify(event.entityName)}`}
               style={{
                 fontFamily: 'var(--fm)', fontSize: 10, letterSpacing: '0.08em',
                 textTransform: 'uppercase', color: 'var(--indigo-l)', textDecoration: 'none',
@@ -192,7 +193,7 @@ export default async function EventDetailPage(
             <div style={GLASS_CARD}>
               <div style={SECTION_HEADER}>Entity</div>
               <Link
-                href={`/entity/${encodeURIComponent(event.entityName)}`}
+                href={`/entity/${slugify(event.entityName)}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '10px 12px', borderRadius: 8,

@@ -5,6 +5,7 @@ import { getSignalById, getRelatedSignals, getSupportingEventsForSignal } from '
 import { Badge } from '@/components/ui/Badge';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
+import { slugify } from '@/utils/sanitize';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -123,7 +124,7 @@ export default async function SignalDetailPage(
           </span>
           {signal.entityName && (
             <Link
-              href={`/entity/${encodeURIComponent(signal.entityName)}`}
+              href={`/entity/${slugify(signal.entityName)}`}
               style={{
                 fontFamily: 'var(--fm)', fontSize: 10, letterSpacing: '0.08em',
                 textTransform: 'uppercase', color: 'var(--indigo-l)', textDecoration: 'none',
@@ -248,7 +249,7 @@ export default async function SignalDetailPage(
                   return (
                     <Link
                       key={name}
-                      href={`/entity/${encodeURIComponent(name)}`}
+                      href={`/entity/${slugify(name)}`}
                       style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '8px 12px', borderRadius: 8,
@@ -330,7 +331,7 @@ export default async function SignalDetailPage(
             <div style={GLASS_CARD}>
               <div style={SECTION_HEADER}>Entity</div>
               <Link
-                href={`/entity/${encodeURIComponent(signal.entityName)}`}
+                href={`/entity/${slugify(signal.entityName)}`}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '10px 12px', borderRadius: 8,

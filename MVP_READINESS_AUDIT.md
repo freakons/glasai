@@ -36,7 +36,7 @@
 
 - **Homepage**: Live DB stats with fallback, hero section, feature grid, trend radar component.
 - **Intelligence feed** (`/intelligence`): Composed signal feed with stat cards, featured article, filtering, command bar. Revalidates every 5 minutes.
-- **Entity pages** (`/entity/[name]`): Full intelligence profile — metrics (24h/7d/30d signals, velocity, trend), major developments timeline, related entities, source coverage. Real DB data.
+- **Entity pages** (`/entity/[slug]`): Full intelligence profile — metrics (24h/7d/30d signals, velocity, trend), major developments timeline, related entities, source coverage. Real DB data.
 - **Graph page** (`/graph`): Force-directed visualization using `react-force-graph` with entity/event/signal node types.
 - **Signals browser** (`/signals`): Client-side filterable signal list with mock fallback in dev only.
 - **Dashboard** (`/dashboard/*`): Tabbed layout with signals, trends, and insights views.

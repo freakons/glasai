@@ -766,6 +766,31 @@ export async function getEntityByName(name: string): Promise<EntityProfile | nul
 }
 
 /**
+ * Fetch a single entity by URL slug for the entity dossier page.
+ *
+ * Matches the slug against a slugified version of the entity name.
+ * Falls back to fetching all entities and matching client-side because
+ * PostgreSQL doesn't have a built-in slugify that mirrors our TS util.
+ */
+export async function getEntityBySlug(slug: string): Promise<EntityProfile | null> {
+  // Import lazily to avoid circular deps
+  const { slugify } = await import('@/utils/sanitize');
+  try {
+    const rows = await dbQuery<EntityRow>`
+      SELECT
+        id, name, type, description, sector, country,
+        founded, website, risk_level, tags, financial_scale, created_at
+      FROM entities
+      ORDER BY created_at ASC
+    `;
+    const match = rows.find((r) => slugify(r.name) === slug);
+    return match ? rowToEntity(match) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch signals linked to an entity via the signal_entities junction table.
  *
  * Used by the entity dossier page to show recent intelligence activity.

@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import {
-  getEntityByName,
+  getEntityBySlug,
   getSignalsForEntity,
   getEventsForEntity,
   getEntityMetrics,
@@ -49,13 +49,14 @@ const EMPTY_TEXT: React.CSSProperties = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateMetadata(
-  { params }: { params: Promise<{ name: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ): Promise<Metadata> {
-  const { name } = await params;
-  const entityName = decodeURIComponent(name);
+  const { slug } = await params;
+  const entity = await getEntityBySlug(slug);
+  const displayName = entity?.name ?? slug;
   return {
-    title: `${entityName} — Entity Intelligence Dossier`,
-    description: `Intelligence dossier for ${entityName} — signals, events, metrics, and related activity.`,
+    title: `${displayName} — Entity Intelligence Dossier`,
+    description: `Intelligence dossier for ${displayName} — signals, events, metrics, and related activity.`,
   };
 }
 
@@ -66,13 +67,14 @@ export const revalidate = 300;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default async function EntityDossierPage(
-  { params }: { params: Promise<{ name: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ) {
-  const { name } = await params;
-  const entityName = decodeURIComponent(name);
+  const { slug } = await params;
 
-  const entity = await getEntityByName(entityName).catch(() => null);
+  const entity = await getEntityBySlug(slug);
   if (!entity) notFound();
+
+  const entityName = entity.name;
 
   const [signals, events, metrics] = await Promise.all([
     getSignalsForEntity(entityName, 20).catch(() => []),
