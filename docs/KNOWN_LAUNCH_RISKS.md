@@ -35,16 +35,25 @@
 
 ## Medium Risk — Address Post-Launch
 
-### 6. No automated test suite
+### 6. GNews API free-tier rate limit
+**Impact:** The pipeline runs 10 queries per invocation. GNews free tier allows 100 requests/day. At hourly cron (24 runs/day × 10 queries = 240), the quota depletes within hours. After depletion, ingestion silently returns 0 articles.
+**Mitigation:** The 50 RSS sources in `src/config/sources.ts` provide a fallback ingestion path. Monitor GNews usage and consider upgrading the plan or reducing `GNEWS_MAX_QUERIES` if signal generation is sparse.
+
+### 7. Homepage stats are hardcoded fallbacks
+**File:** `src/config/site.ts`
+**Impact:** Homepage shows `47 signals, 18 companies, 7 regulations` even when the database is empty. This masks ingestion failures.
+**Mitigation:** Acceptable for launch optics. Replace with live queries once ingestion is stable.
+
+### 8. No automated test suite
 **Impact:** Regressions can only be caught via TypeScript type checking and manual testing.
 **Recommendation:** Add integration tests for critical paths (digest, pipeline, watchlist) after launch stabilization.
 
-### 7. Single TypeScript error in test file
+### 9. Single TypeScript error in test file
 **File:** `src/db/__tests__/consistencyChecks.test.ts:293`
 **Error:** Type comparison mismatch (`"ok"` vs `"started"`).
 **Impact:** Pre-existing; does not affect runtime behavior.
 
-### 8. ESLint config doesn't cover plain JS files
+### 10. ESLint config doesn't cover plain JS files
 **Impact:** `scripts/deployment-check.js` is not linted. Minimal risk since it's a simple validation script.
 
 ---
@@ -55,3 +64,5 @@
 - **Redis requirement** — Redis is optional; app degrades gracefully to in-memory/CDN caching.
 - **Multi-timezone digest scheduling** — Digests send at 7:00 UTC for all users. Timezone-aware scheduling is a post-launch feature.
 - **Email verification** — Email regex validation only; no verification email sent. Acceptable for early users.
+- **Premium intelligence mode** — Significance scoring is designed (`docs/signal-significance-architecture.md`) but not implemented. Standard mode works; Premium equals Standard with a higher confidence threshold.
+- **`signal_entities` join table** — Referenced by `alertEngine.ts` but not created in migrations. Alert engine falls back gracefully. Needed for entity-level velocity alerts post-launch.
