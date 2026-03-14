@@ -18,6 +18,7 @@ import {
   acquirePipelineLock,
   releasePipelineLock,
   getPipelineLockStatus,
+  forceReleasePipelineLock,
 } from '@/lib/pipeline/lock';
 import { logWithRequestId } from '@/lib/requestId';
 
@@ -49,7 +50,9 @@ export type LockGuardResult<T> = LockGuardSuccess<T> | LockGuardBlocked;
  *
  * @param triggeredBy  Who is requesting the lock (e.g. 'cron', 'admin', 'ingest')
  * @param requestId    Correlation ID for logging
- * @param scope        Log scope label (e.g. 'pipeline/run', 'ingest', 'signals')
+ * @param scope        Log scope label AND lock scope key. Different scopes use
+ *                     separate lock keys so pipeline/run and intelligence/run
+ *                     don't block each other.
  * @param fn           The pipeline work to execute under the lock
  */
 export async function withPipelineLock<T>(
@@ -58,7 +61,7 @@ export async function withPipelineLock<T>(
   scope: string,
   fn: () => Promise<T>,
 ): Promise<LockGuardResult<T>> {
-  const lockResult = await acquirePipelineLock(triggeredBy);
+  const lockResult = await acquirePipelineLock(triggeredBy, scope);
 
   if (!lockResult.acquired) {
     logWithRequestId(requestId, scope, `lock denied — ${lockResult.reason} (lockedBy=${lockResult.lockedBy ?? 'unknown'})`);
@@ -80,7 +83,7 @@ export async function withPipelineLock<T>(
       strategy: lockResult.strategy,
     };
   } finally {
-    await releasePipelineLock(lockResult.lockId);
+    await releasePipelineLock(lockResult.lockId, scope);
     logWithRequestId(requestId, scope, `lock released (lockId=${lockResult.lockId})`);
   }
 }
@@ -110,4 +113,4 @@ export function pipelineLockedResponse(
 }
 
 // Re-export for convenience so routes only need one import
-export { getPipelineLockStatus };
+export { getPipelineLockStatus, forceReleasePipelineLock };

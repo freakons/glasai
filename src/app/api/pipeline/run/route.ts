@@ -56,17 +56,19 @@ import { TimeoutError }                         from '@/lib/withTimeout';
 import type { TriggerType, RunStatus, PipelineStageResult } from '@/lib/pipeline/types';
 import { toDbStatus }                           from '@/lib/pipeline/types';
 
-// Vercel function timeout (seconds). Increase to 300 on Pro plan.
+// Vercel function timeout (seconds). 300 = max for Pro plan.
 // https://vercel.com/docs/functions/runtimes#max-duration
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // ── Stage timeout defaults (ms) ───────────────────────────────────────────────
+// With maxDuration=300 (Vercel Pro), we can afford generous per-stage timeouts.
+// Overall timeout is 290s (leaving 10s for response serialization).
 const TIMEOUT = {
-  INGEST:   parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS   ?? '30000', 10),
-  SIGNALS:  parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS  ?? '10000', 10),
-  SNAPSHOT: parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS ?? '15000', 10),
-  CACHE:    parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS    ?? '5000',  10),
-  OVERALL:  parseInt(process.env.PIPELINE_TIMEOUT_MS          ?? '55000', 10),
+  INGEST:   parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS   ?? '120000', 10),
+  SIGNALS:  parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS  ?? '30000',  10),
+  SNAPSHOT: parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS ?? '60000',  10),
+  CACHE:    parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS    ?? '10000',  10),
+  OVERALL:  parseInt(process.env.PIPELINE_TIMEOUT_MS          ?? '290000', 10),
 } as const;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -262,7 +264,20 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const isDryRun = url.searchParams.get('dry_run') === 'true';
 
-  validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
+  try {
+    validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
+  } catch (envErr) {
+    return NextResponse.json(
+      {
+        ok: false,
+        status: 'config_error',
+        message: envErr instanceof Error ? envErr.message : 'Missing critical environment variables',
+        runId: correlationId,
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    );
+  }
 
   if (!isAuthorized(req)) {
     logWithRequestId(correlationId, 'pipeline/run', 'unauthorized');
