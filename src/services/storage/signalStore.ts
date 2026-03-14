@@ -15,6 +15,7 @@
 
 import { dbQuery } from '@/db/client';
 import type { Signal, SignalType, SignalDirection } from '@/types/intelligence';
+import type { SignalInsight } from '@/lib/intelligence/generateSignalInsight';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Row type returned from the `signals` table
@@ -33,6 +34,11 @@ interface SignalRow {
   human_verified: boolean;
   created_at: string;
   updated_at: string | null;
+  // Intelligence layer (migration 014) — nullable
+  why_this_matters?: string | null;
+  strategic_impact?: string | null;
+  who_should_care?: string | null;
+  prediction?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,6 +66,10 @@ function rowToSignal(row: SignalRow): Signal {
                           ? row.updated_at
                           : new Date(row.updated_at).toISOString()
                         : undefined,
+    whyThisMatters:   row.why_this_matters ?? undefined,
+    strategicImpact:  row.strategic_impact ?? undefined,
+    whoShouldCare:    row.who_should_care ?? undefined,
+    prediction:       row.prediction ?? undefined,
   };
 }
 
@@ -153,4 +163,35 @@ export async function getRecentSignals(limit = 20): Promise<Signal[]> {
   `;
 
   return rows.map(rowToSignal);
+}
+
+/**
+ * Update a signal's intelligence layer fields.
+ *
+ * Uses a try/catch to gracefully handle cases where migration 014 has not
+ * yet been applied (the columns don't exist). Returns true on success.
+ */
+export async function updateSignalInsight(
+  signalId: string,
+  insight: SignalInsight,
+): Promise<boolean> {
+  try {
+    await dbQuery`
+      UPDATE signals
+      SET
+        why_this_matters = ${insight.why_this_matters},
+        strategic_impact = ${insight.strategic_impact},
+        who_should_care  = ${insight.who_should_care},
+        prediction       = ${insight.prediction},
+        updated_at       = NOW()
+      WHERE id = ${signalId}
+    `;
+    return true;
+  } catch (err) {
+    console.error(
+      `[signalStore] updateSignalInsight failed for ${signalId}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
 }

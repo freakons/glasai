@@ -50,6 +50,17 @@ export interface Signal {
    * Present when computed by batch or detail queries; undefined otherwise.
    */
   momentum?: { recentCount: number; previousCount: number } | null;
+
+  // ── Intelligence layer fields (migration 014) ──────────────────────────────
+
+  /** Plain-language explanation of why this signal matters */
+  whyThisMatters?: string | null;
+  /** Strategic implications for decision-makers */
+  strategicImpact?: string | null;
+  /** Target audience / roles most affected */
+  whoShouldCare?: string | null;
+  /** Forward-looking assessment */
+  prediction?: string | null;
 }
 
 export const MOCK_SIGNALS: Signal[] = [

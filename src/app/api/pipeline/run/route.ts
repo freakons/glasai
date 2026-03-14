@@ -46,7 +46,8 @@ import { ingestGNews }                          from '@/services/ingestion/gnews
 import { ingestRss }                            from '@/services/ingestion/rssIngester';
 import { getRecentEvents }                      from '@/services/storage/eventStore';
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
-import { saveSignals }                          from '@/services/storage/signalStore';
+import { saveSignals, updateSignalInsight }     from '@/services/storage/signalStore';
+import { generateSignalInsight }                from '@/lib/intelligence/generateSignalInsight';
 import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { generatePageSnapshots }               from '@/lib/pipeline/snapshot';
 import { refreshCaches }                        from '@/lib/pipeline/cacheRefresh';
@@ -377,11 +378,13 @@ export async function POST(req: NextRequest) {
       }
 
       // Stage 2 — Signal generation
+      let generatedSigs: Awaited<ReturnType<typeof generateSignalsFromEvents>> = [];
       const signals = await runStage(
         'signals',
         async () => {
           const events  = await getRecentEvents(500);
           const sigs    = generateSignalsFromEvents(events);
+          generatedSigs = sigs;
           const saved   = await saveSignals(sigs);
           return { eventsLoaded: events.length, signalsSaved: saved };
         },
@@ -397,6 +400,47 @@ export async function POST(req: NextRequest) {
           stage: 'signals', status: 'ok', durationMs: signals.durationMs,
           eventsLoaded: signals.result!.eventsLoaded, signalsGenerated,
         });
+      }
+
+      // Stage 2b — Intelligence layer ("Why This Matters") — non-blocking
+      // Only process newly generated signals; failures are swallowed.
+      if (generatedSigs.length > 0) {
+        const intel = await runStage(
+          'intelligence',
+          async () => {
+            let insightsGenerated = 0;
+            for (const sig of generatedSigs) {
+              try {
+                const insight = await generateSignalInsight({
+                  title: sig.title,
+                  summary: sig.description,
+                  entities: sig.affectedEntities ?? [],
+                  signalType: sig.type,
+                  direction: sig.direction,
+                });
+                // Only persist if at least one field was generated
+                if (insight.why_this_matters || insight.strategic_impact || insight.who_should_care) {
+                  await updateSignalInsight(sig.id, insight);
+                  insightsGenerated++;
+                }
+              } catch {
+                // Per-signal failure is non-fatal
+              }
+            }
+            return { insightsGenerated, signalsProcessed: generatedSigs.length };
+          },
+          TIMEOUT.SIGNALS,
+          correlationId,
+        );
+        if (intel.error) {
+          // Intelligence failure is non-fatal — log but don't increment errorsCount
+          stages.push({ stage: 'intelligence', status: 'error', durationMs: intel.durationMs, error: intel.error, timedOut: intel.timedOut });
+        } else {
+          stages.push({
+            stage: 'intelligence', status: 'ok', durationMs: intel.durationMs,
+            ...intel.result!,
+          });
+        }
       }
 
       // Stage 3 — Snapshot generation
