@@ -5,8 +5,10 @@ import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';
 import { IntelligenceFeed } from './IntelligenceFeed';
 import { EcosystemActivity } from './EcosystemActivity';
+import { EmergingTrends } from '@/components/intelligence/EmergingTrends';
 import { CommandBar } from '@/ui/layout/CommandBar';
 import { composeFeed } from '@/lib/signals/feedComposer';
+import { clusterSignals } from '@/lib/signals/clusterSignals';
 
 import type { Metadata } from 'next';
 
@@ -45,6 +47,9 @@ export default async function IntelligencePage() {
     signal.momentum = momentumMap.get(signal.id) ?? null;
   }
 
+  // Cluster signals into emerging trends
+  const trendClusters = clusterSignals(composedSignals);
+
   // Core counts — live from DB only, no hardcoded fallbacks
   const signals     = String(live.signals);
   const regulations = String(live.regulations);
@@ -80,6 +85,8 @@ export default async function IntelligencePage() {
       <EcosystemActivity snapshot={snapshot} />
 
       {featured && <FeaturedCard article={featured} />}
+
+      <EmergingTrends clusters={trendClusters} />
 
       <IntelligenceFeed signals={composedSignals} articles={articles} />
 
