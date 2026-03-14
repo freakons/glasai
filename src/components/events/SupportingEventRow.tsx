@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { AiEvent } from '@/data/mockEvents';
+import { EntityQuickProfile } from '@/components/entity/EntityQuickProfile';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Style constants (minimal — most styling lives in globals.css .row-interactive)
@@ -78,7 +79,9 @@ export function SupportingEventRow({ event, sourceUrl }: SupportingEventRowProps
       <span style={TYPE_TAG}>{event.type}</span>
       <span style={META_TEXT}>{formatDate(event.date)}</span>
       {event.entityName && (
-        <span style={META_TEXT}>{event.entityName}</span>
+        <EntityQuickProfile entityName={event.entityName} style={META_TEXT}>
+          {event.entityName}
+        </EntityQuickProfile>
       )}
       {event.amount && (
         <span style={AMOUNT}>{event.amount}</span>
