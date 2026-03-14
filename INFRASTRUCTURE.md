@@ -64,9 +64,9 @@
 | Resource | Detail |
 |---|---|
 | Plan | Pro ($20/month) — needed for cron jobs + higher limits |
-| Edge Functions | `/api/news`, `/api/subscribe`, `/api/digest` |
+| Edge Functions | `/api/news`, `/api/subscribe`, `/api/alerts/send-digest` |
 | Regions | Auto — Vercel deploys to closest region per user |
-| Cron | Digest: `0 9 * * 5` (Friday 09:00 UTC) |
+| Cron | Digest: `0 7 * * *` (daily 07:00 UTC) |
 | Bandwidth | ~400GB/month at 250K users — within Pro limits |
 
 **Traffic capacity:** Vercel auto-scales. At 250K users/week (~36K/day, ~1,500/hr peak), no concurrency issues. Edge Functions are serverless — each request is independent.
@@ -246,7 +246,7 @@ Neon PostgreSQL:
 | Page loads (HTML) | ~250K/week | Cloudflare cache |
 | `/api/news` requests | ~50K/week | Upstash cache (30min TTL) |
 | `/api/subscribe` | ~1K/week | Vercel → Resend |
-| `/api/digest` | 1/week | Vercel cron |
+| `/api/alerts/send-digest` | 1/day | Vercel cron |
 | DB queries | ~10K/week | Neon (within free tier) |
 
 **Bottleneck analysis:** GNews free tier (100 req/day) is the real limit. At 30min cache TTL, we make max 48 calls/day to GNews — well within limits even at 250K users.

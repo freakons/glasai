@@ -80,13 +80,13 @@ export async function GET(
   const { name } = await params;
   const entityName = decodeURIComponent(name);
 
-  // 1. Fetch the entity record — exact name first, then slug fallback
+  // 1. Fetch the entity record — case-insensitive name first, then slug fallback
   let [entity] = await dbQuery<EntityRow>`
     SELECT
       id, name, type, description, sector, country,
       founded, website, risk_level, tags, financial_scale, created_at
     FROM entities
-    WHERE name = ${entityName}
+    WHERE LOWER(name) = LOWER(${entityName})
     LIMIT 1
   `;
 
@@ -106,6 +106,10 @@ export async function GET(
     return NextResponse.json({ ok: false, error: 'Entity not found' }, { status: 404 });
   }
 
+  // Use the canonical name from the DB for all subsequent queries
+  // to avoid case-sensitivity mismatches between URL param and stored data
+  const canonicalName = entity.name;
+
   // 2. Fetch recent signals for this entity (last 20), including significance
   const recentSignals = await dbQuery<SignalRow>`
     SELECT
@@ -124,7 +128,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
     ORDER BY s.created_at DESC
     LIMIT 20
   `;
@@ -135,7 +139,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
       AND s.created_at > NOW() - INTERVAL '24 hours'
   `;
 
@@ -144,7 +148,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
       AND s.created_at > NOW() - INTERVAL '7 days'
   `;
 
@@ -155,7 +159,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
   `;
 
   // 3b. 30-day signal count
@@ -164,7 +168,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
       AND s.created_at > NOW() - INTERVAL '30 days'
   `;
 
@@ -192,8 +196,8 @@ export async function GET(
     JOIN entities e1 ON e1.id = se.entity_id
     JOIN signal_entities se2 ON se2.signal_id = se.signal_id
     JOIN entities e2 ON e2.id = se2.entity_id
-    WHERE e1.name = ${entityName}
-      AND e2.name != ${entityName}
+    WHERE e1.name = ${canonicalName}
+      AND e2.name != ${canonicalName}
     GROUP BY e2.name, e2.type
     ORDER BY mentions DESC
     LIMIT 10
@@ -213,7 +217,7 @@ export async function GET(
   const recentEvents = await dbQuery<EventRow>`
     SELECT id, type, title, description, entity_name, amount, timestamp
     FROM events
-    WHERE entity_name = ${entityName}
+    WHERE LOWER(entity_name) = LOWER(${canonicalName})
     ORDER BY timestamp DESC
     LIMIT 15
   `;
@@ -227,7 +231,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
       AND s.significance_score IS NOT NULL
     ORDER BY s.significance_score DESC, s.created_at DESC
     LIMIT 5
@@ -239,7 +243,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
       AND s.source_support_count IS NOT NULL
       AND s.source_support_count > 0
   `;
@@ -250,7 +254,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
   `;
 
   // 8. Last activity — most recent signal for this entity
@@ -259,7 +263,7 @@ export async function GET(
     FROM signals s
     JOIN signal_entities se ON se.signal_id = s.id
     JOIN entities e ON e.id = se.entity_id
-    WHERE e.name = ${entityName}
+    WHERE e.name = ${canonicalName}
   `;
 
   return NextResponse.json({

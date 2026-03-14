@@ -14,7 +14,7 @@ interface Subscription {
 type CardState =
   | { phase: 'loading' }
   | { phase: 'form'; email: string; error: string | null; saving: boolean }
-  | { phase: 'active'; email: string; isEnabled: boolean; toggling: boolean };
+  | { phase: 'active'; email: string; isEnabled: boolean; toggling: boolean; error: string | null };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -97,6 +97,7 @@ export function EmailDigestCard() {
             email: data.subscription.email,
             isEnabled: data.subscription.isEnabled,
             toggling: false,
+            error: null,
           });
         } else {
           setState({ phase: 'form', email: '', error: null, saving: false });
@@ -127,6 +128,7 @@ export function EmailDigestCard() {
         email: data.subscription?.email || email,
         isEnabled: data.subscription?.isEnabled ?? true,
         toggling: false,
+        error: null,
       });
     } catch {
       setState((s: CardState) => (s.phase === 'form' ? { ...s, saving: false, error: 'Network error. Try again.' } : s));
@@ -143,12 +145,12 @@ export function EmailDigestCard() {
         body: JSON.stringify({ email, isEnabled: newEnabled }),
       });
       if (res.ok) {
-        setState((s: CardState) => (s.phase === 'active' ? { ...s, isEnabled: newEnabled, toggling: false } : s));
+        setState((s: CardState) => (s.phase === 'active' ? { ...s, isEnabled: newEnabled, toggling: false, error: null } : s));
       } else {
-        setState((s: CardState) => (s.phase === 'active' ? { ...s, toggling: false } : s));
+        setState((s: CardState) => (s.phase === 'active' ? { ...s, toggling: false, error: 'Could not update. Try again.' } : s));
       }
     } catch {
-      setState((s: CardState) => (s.phase === 'active' ? { ...s, toggling: false } : s));
+      setState((s: CardState) => (s.phase === 'active' ? { ...s, toggling: false, error: 'Network error. Try again.' } : s));
     }
   }, []);
 
@@ -198,6 +200,14 @@ export function EmailDigestCard() {
             ? 'Updating...'
             : state.isEnabled ? 'Pause digest' : 'Resume digest'}
         </button>
+
+        {state.error && (
+          <p style={{
+            fontSize: 11, color: 'var(--rose, #fb7185)', marginTop: 10, marginBottom: 0,
+          }}>
+            {state.error}
+          </p>
+        )}
       </div>
     );
   }

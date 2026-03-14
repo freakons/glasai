@@ -2,9 +2,10 @@ import Link from 'next/link';
 import type { Signal } from '@/data/mockSignals';
 import type { FundingRound } from '@/lib/data/funding';
 import type { AIModel } from '@/lib/data/models';
-import type { ActiveEntity, EcosystemSnapshot } from '@/db/queries';
+import type { ActiveEntity, EcosystemSnapshot, EntityMomentumRecord } from '@/db/queries';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 import { HeatIndicator } from '@/components/intelligence/HeatIndicator';
+import { EntityMomentumBadge } from '@/components/entity/EntityMomentumBadge';
 import { computeSectionHeat } from '@/lib/intelligence/heatScore';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,6 +59,15 @@ function ModelRow({ model }: { model: AIModel }) {
   );
 }
 
+function MomentumEntityRow({ record }: { record: EntityMomentumRecord }) {
+  return (
+    <Link href={`/entity/${record.slug}`} className="eco-row">
+      <span className="eco-title">{record.entityName}</span>
+      <EntityMomentumBadge result={record.result} showScore />
+    </Link>
+  );
+}
+
 function EmptyState() {
   return <p className="eco-empty">No activity detected.</p>;
 }
@@ -68,16 +78,18 @@ function EmptyState() {
 
 interface EcosystemActivityProps {
   snapshot: EcosystemSnapshot;
+  topMomentumEntities?: EntityMomentumRecord[];
 }
 
-export function EcosystemActivity({ snapshot }: EcosystemActivityProps) {
+export function EcosystemActivity({ snapshot, topMomentumEntities = [] }: EcosystemActivityProps) {
   const { topSignals, mostActiveEntities, recentFunding, modelReleases } = snapshot;
 
   const hasAnyData =
     topSignals.length > 0 ||
     mostActiveEntities.length > 0 ||
     recentFunding.length > 0 ||
-    modelReleases.length > 0;
+    modelReleases.length > 0 ||
+    topMomentumEntities.length > 0;
 
   if (!hasAnyData) return null;
 
@@ -112,6 +124,18 @@ export function EcosystemActivity({ snapshot }: EcosystemActivityProps) {
             ? mostActiveEntities.map((e) => <EntityRow key={e.name} entity={e} />)
             : <EmptyState />}
         </div>
+
+        {/* ── Top Momentum Entities ──────────────────────────────── */}
+        {topMomentumEntities.length > 0 && (
+          <div className="eco-panel">
+            <div className="eco-panel-header">
+              <h3 className="eco-panel-title">Top Momentum</h3>
+            </div>
+            {topMomentumEntities.map((r) => (
+              <MomentumEntityRow key={r.entityName} record={r} />
+            ))}
+          </div>
+        )}
 
         {/* ── Recent Funding ───────────────────────────────────────── */}
         <div className="eco-panel">

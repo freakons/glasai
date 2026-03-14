@@ -45,9 +45,9 @@ import { runInsightGeneration } from '@/insights/runner';
 import { dbQuery } from '@/db/client';
 import type { TriggerType } from '@/lib/pipeline/types';
 
-// Vercel function timeout (seconds). Upgrade to Pro plan for longer runs.
+// Vercel function timeout (seconds). 60s for intelligence analysis on Pro plan.
 // https://vercel.com/docs/functions/runtimes#max-duration
-export const maxDuration = 10;
+export const maxDuration = 60;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth
@@ -182,10 +182,21 @@ export async function POST(req: NextRequest) {
   const url   = new URL(req.url);
   const isDryRun = url.searchParams.get('dry_run') === 'true';
 
-  // Validate critical env vars (throws HTTP 500 in production if missing).
-  // NOTE: GNEWS_API_KEY is NOT required here — the harvester also uses RSS,
-  // GitHub, and Arxiv sources that work without it.
-  validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
+  // Validate critical env vars — return clear JSON error instead of generic 500.
+  try {
+    validateEnvironment(['DATABASE_URL', 'CRON_SECRET']);
+  } catch (envErr) {
+    return NextResponse.json(
+      {
+        ok: false,
+        status: 'config_error',
+        message: envErr instanceof Error ? envErr.message : 'Missing critical environment variables',
+        runId: reqId,
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    );
+  }
 
   // Warn (not throw) if no LLM provider is configured.
   checkLLMProvider();

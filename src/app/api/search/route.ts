@@ -10,6 +10,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQuery, tableExists } from '@/db/client';
+import { slugify } from '@/utils/sanitize';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Result types
@@ -54,17 +55,6 @@ function filterActions(q: string): SearchResult[] {
       a.label.toLowerCase().includes(lower) ||
       a.subtitle.toLowerCase().includes(lower),
   );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Slugify (mirrors the app's slugify util)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

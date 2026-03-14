@@ -77,6 +77,16 @@ interface SignalRow {
   ctx_generation_error?: string | null;
   ctx_created_at?: string | null;
   ctx_updated_at?: string | null;
+
+  // Intelligence layer (migration 014) — nullable
+  why_this_matters?: string | null;
+  strategic_impact?: string | null;
+  who_should_care?: string | null;
+  prediction?: string | null;
+  // Intelligence status tracking (migration 015)
+  insight_generated?: boolean;
+  insight_generated_at?: string | null;
+  insight_generation_error?: string | null;
 }
 
 interface EventRow {
@@ -171,6 +181,10 @@ function rowToSignal(row: SignalRow): Signal {
     significanceScore:  row.significance_score ?? undefined,
     sourceSupportCount: row.source_support_count ?? undefined,
     ...(context !== undefined ? { context } : {}),
+    whyThisMatters:  row.why_this_matters ?? undefined,
+    strategicImpact: row.strategic_impact ?? undefined,
+    whoShouldCare:   row.who_should_care ?? undefined,
+    prediction:      row.prediction ?? undefined,
   };
 }
 
@@ -299,6 +313,10 @@ export async function getSignals(
           s.created_at,
           s.significance_score,
           s.source_support_count,
+          s.why_this_matters,
+          s.strategic_impact,
+          s.who_should_care,
+          s.prediction,
           sc.id                     AS ctx_id,
           sc.summary                AS ctx_summary,
           sc.why_it_matters         AS ctx_why_it_matters,
@@ -338,7 +356,11 @@ export async function getSignals(
         date,
         created_at,
         significance_score,
-        source_support_count
+        source_support_count,
+        why_this_matters,
+        strategic_impact,
+        who_should_care,
+        prediction
       FROM signals
       WHERE status IS NULL OR status NOT IN ('rejected')
       ORDER BY created_at DESC
@@ -485,7 +507,8 @@ export async function getSignalById(id: string): Promise<Signal | null> {
     SELECT
       id, title, summary, description, category, signal_type,
       entity_id, entity_name, confidence, confidence_score,
-      date, created_at, significance_score, source_support_count
+      date, created_at, significance_score, source_support_count,
+      why_this_matters, strategic_impact, who_should_care, prediction
     FROM signals
     WHERE id = ${id}
     LIMIT 1
@@ -510,9 +533,10 @@ export async function getRelatedSignals(
     SELECT
       id, title, summary, description, category, signal_type,
       entity_id, entity_name, confidence, confidence_score,
-      date, created_at, significance_score, source_support_count
+      date, created_at, significance_score, source_support_count,
+      why_this_matters, strategic_impact, who_should_care, prediction
     FROM signals
-    WHERE entity_name = ${entityName}
+    WHERE LOWER(entity_name) = LOWER(${entityName})
       AND id != ${signalId}
       AND (status IS NULL OR status NOT IN ('rejected'))
     ORDER BY significance_score DESC NULLS LAST, created_at DESC
@@ -563,7 +587,7 @@ export async function getSupportingEventsForSignal(
         -- Fallback: events for the same entity within 90 days
         SELECT e.*
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.timestamp >= NOW() - INTERVAL '90 days'
       ),
@@ -649,7 +673,7 @@ export async function getSignalsForEvent(
         -- Fallback: signals for the same entity
         SELECT s.*
         FROM signals s
-        WHERE s.entity_name = ${entityName}
+        WHERE LOWER(s.entity_name) = LOWER(${entityName})
           AND s.entity_name != ''
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
       ),
@@ -663,7 +687,8 @@ export async function getSignalsForEvent(
       SELECT
         id, title, summary, description, category, signal_type,
         entity_id, entity_name, confidence, confidence_score,
-        date, created_at, significance_score, source_support_count
+        date, created_at, significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM combined
       ORDER BY significance_score DESC NULLS LAST, created_at DESC
       LIMIT ${safeLimit}
@@ -813,11 +838,12 @@ export async function getSignalsForEntity(
           s.id, s.title, s.summary, s.description,
           s.category, s.signal_type, s.entity_id, s.entity_name,
           s.confidence, s.confidence_score, s.date, s.created_at,
-          s.significance_score, s.source_support_count
+          s.significance_score, s.source_support_count,
+          s.why_this_matters, s.strategic_impact, s.who_should_care, s.prediction
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ${entityName}
+        WHERE LOWER(e.name) = LOWER(${entityName})
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
         ORDER BY s.created_at DESC
         LIMIT ${safeLimit}
@@ -825,15 +851,16 @@ export async function getSignalsForEntity(
       return rows.map(rowToSignal);
     }
 
-    // Fallback: match on denormalized entity_name column
+    // Fallback: match on denormalized entity_name column (case-insensitive)
     const rows = await dbQuery<SignalRow>`
       SELECT
         id, title, summary, description,
         category, signal_type, entity_id, entity_name,
         confidence, confidence_score, date, created_at,
-        significance_score, source_support_count
+        significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM signals
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
         AND (status IS NULL OR status NOT IN ('rejected'))
       ORDER BY created_at DESC
       LIMIT ${safeLimit}
@@ -860,17 +887,21 @@ export async function getSignalsForEntities(
   try {
     const hasJunction = await tableExists('signal_entities');
 
+    // Use case-insensitive matching to handle casing variants (e.g. "OpenAI" vs "openai")
+    const lowerNames = entityNames.map((n) => n.toLowerCase());
+
     if (hasJunction) {
       const rows = await dbQuery<SignalRow>`
         SELECT DISTINCT ON (s.id)
           s.id, s.title, s.summary, s.description,
           s.category, s.signal_type, s.entity_id, s.entity_name,
           s.confidence, s.confidence_score, s.date, s.created_at,
-          s.significance_score, s.source_support_count
+          s.significance_score, s.source_support_count,
+          s.why_this_matters, s.strategic_impact, s.who_should_care, s.prediction
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ANY(${entityNames})
+        WHERE LOWER(e.name) = ANY(${lowerNames})
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
         ORDER BY s.id, s.created_at DESC
       `;
@@ -879,15 +910,16 @@ export async function getSignalsForEntities(
       return rows.slice(0, safeLimit).map(rowToSignal);
     }
 
-    // Fallback: match on denormalized entity_name column
+    // Fallback: match on denormalized entity_name column (case-insensitive)
     const rows = await dbQuery<SignalRow>`
       SELECT
         id, title, summary, description,
         category, signal_type, entity_id, entity_name,
         confidence, confidence_score, date, created_at,
-        significance_score, source_support_count
+        significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM signals
-      WHERE entity_name = ANY(${entityNames})
+      WHERE LOWER(entity_name) = ANY(${lowerNames})
         AND (status IS NULL OR status NOT IN ('rejected'))
       ORDER BY created_at DESC
       LIMIT ${safeLimit}
@@ -919,7 +951,7 @@ export async function getEventsForEntity(
         entity_id, entity_name, company,
         amount, signal_ids, timestamp, created_at
       FROM events
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
       ORDER BY timestamp DESC
       LIMIT ${safeLimit}
     `;
@@ -1047,13 +1079,13 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ${entityName}
+        WHERE LOWER(e.name) = LOWER(${entityName})
       `;
 
       const [evtRow] = await dbQuery<{ count: string }>`
         SELECT COUNT(*)::text AS count
         FROM events
-        WHERE entity_name = ${entityName}
+        WHERE LOWER(entity_name) = LOWER(${entityName})
       `;
 
       if (!row) return zero;
@@ -1070,7 +1102,7 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
       };
     }
 
-    // Fallback: denormalized entity_name
+    // Fallback: denormalized entity_name (case-insensitive)
     type MetricRow = {
       total: string;
       h24: string;
@@ -1091,13 +1123,13 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
         MIN(created_at)::text AS first_seen,
         MAX(created_at)::text AS last_activity
       FROM signals
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
     `;
 
     const [evtRow] = await dbQuery<{ count: string }>`
       SELECT COUNT(*)::text AS count
       FROM events
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
     `;
 
     if (!row) return zero;
@@ -1278,7 +1310,7 @@ export async function getSourceArticlesForSignal(
         -- Fallback: entity-based events within 90 days
         SELECT e.source_article_id
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.source_article_id IS NOT NULL
           AND e.timestamp >= NOW() - INTERVAL '90 days'
@@ -1335,7 +1367,7 @@ export async function getSignalMomentum(
         -- Strategy 3: Entity fallback (90-day window)
         SELECT e.timestamp
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.timestamp >= NOW() - INTERVAL '90 days'
       )
@@ -2002,6 +2034,8 @@ export interface AlertRecord {
   priority: number;
   createdAt: string;
   read: boolean;
+  /** Intelligence layer: why this signal matters (from migration 014) */
+  whyThisMatters?: string | null;
 }
 
 function mapAlertRow(row: AlertRow): AlertRecord {
@@ -2266,7 +2300,11 @@ export async function getUsersWatchingEntityName(entityName: string): Promise<st
 
 /**
  * Find all user IDs watching any of the given entity names.
- * Returns a map: entityName → [userId1, userId2, ...]
+ * Returns a map: lowercased entityName → [userId1, userId2, ...]
+ *
+ * IMPORTANT: Map keys are lowercased for case-insensitive lookup.
+ * Callers must use normalizeEntityForMatching() (or .toLowerCase())
+ * when looking up entries in the returned map.
  */
 export async function getUsersWatchingEntityNames(entityNames: string[]): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>();
@@ -2278,7 +2316,8 @@ export async function getUsersWatchingEntityNames(entityNames: string[]): Promis
     WHERE LOWER(entity_name) = ANY(${entityNames.map((n) => n.toLowerCase())})
   `;
   for (const row of rows) {
-    const key = row.entity_name;
+    // Key by lowercased name so callers can do case-insensitive lookups
+    const key = row.entity_name.toLowerCase();
     if (!result.has(key)) result.set(key, []);
     result.get(key)!.push(row.user_id);
   }
@@ -2392,17 +2431,22 @@ export async function getDigestAlertsForUser(
 ): Promise<AlertRecord[]> {
   if (!(await tableExists('alerts'))) return [];
 
-  const rows = await dbQuery<AlertRow>`
-    SELECT id, user_id, type, entity_name, signal_id, trend_id,
-           title, message, priority, created_at, read
-    FROM alerts
-    WHERE user_id = ${userId}
-      AND type = ANY(${PERSONAL_DIGEST_TYPES})
-      AND created_at > ${since}
-    ORDER BY priority DESC, created_at DESC
+  const rows = await dbQuery<AlertRow & { sig_why_this_matters?: string | null }>`
+    SELECT a.id, a.user_id, a.type, a.entity_name, a.signal_id, a.trend_id,
+           a.title, a.message, a.priority, a.created_at, a.read,
+           s.why_this_matters AS sig_why_this_matters
+    FROM alerts a
+    LEFT JOIN signals s ON s.id = a.signal_id
+    WHERE a.user_id = ${userId}
+      AND a.type = ANY(${PERSONAL_DIGEST_TYPES})
+      AND a.created_at > ${since}
+    ORDER BY a.priority DESC, a.created_at DESC
     LIMIT 50
   `;
-  return rows.map(mapAlertRow);
+  return rows.map((r) => ({
+    ...mapAlertRow(r),
+    whyThisMatters: r.sig_why_this_matters ?? undefined,
+  }));
 }
 
 /**
@@ -2415,17 +2459,22 @@ export async function getTopPlatformDigestAlerts(
 ): Promise<AlertRecord[]> {
   if (!(await tableExists('alerts'))) return [];
 
-  const rows = await dbQuery<AlertRow>`
-    SELECT id, user_id, type, entity_name, signal_id, trend_id,
-           title, message, priority, created_at, read
-    FROM alerts
-    WHERE user_id IS NULL
-      AND type = ANY(${PLATFORM_DIGEST_TYPES})
-      AND created_at > ${since}
-    ORDER BY priority DESC, created_at DESC
+  const rows = await dbQuery<AlertRow & { sig_why_this_matters?: string | null }>`
+    SELECT a.id, a.user_id, a.type, a.entity_name, a.signal_id, a.trend_id,
+           a.title, a.message, a.priority, a.created_at, a.read,
+           s.why_this_matters AS sig_why_this_matters
+    FROM alerts a
+    LEFT JOIN signals s ON s.id = a.signal_id
+    WHERE a.user_id IS NULL
+      AND a.type = ANY(${PLATFORM_DIGEST_TYPES})
+      AND a.created_at > ${since}
+    ORDER BY a.priority DESC, a.created_at DESC
     LIMIT ${limit}
   `;
-  return rows.map(mapAlertRow);
+  return rows.map((r) => ({
+    ...mapAlertRow(r),
+    whyThisMatters: r.sig_why_this_matters ?? undefined,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2457,4 +2506,151 @@ export async function recordDigestSend(userId: string, forDate: string): Promise
     VALUES (${userId}, ${forDate})
     ON CONFLICT (user_id, sent_for_date) DO NOTHING
   `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Momentum
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  computeEntityMomentum,
+  type EntityMomentumInput,
+  type EntityMomentumResult,
+} from '@/lib/entities/computeEntityMomentum';
+
+export interface EntityMomentumRecord {
+  entityName: string;
+  slug: string;
+  input: EntityMomentumInput;
+  result: EntityMomentumResult;
+}
+
+/**
+ * Gather momentum inputs for a single entity and compute the score.
+ *
+ * Uses two 7-day windows:
+ *   recent   = NOW() - 7 days  → NOW()
+ *   previous = NOW() - 14 days → NOW() - 7 days
+ *
+ * Counts:
+ *   - total signals per window
+ *   - high-impact signals (significance_score ≥ 75) in recent window
+ *   - rising-momentum signals in recent window (via event-count comparison)
+ *   - events in recent window
+ */
+export async function getEntityMomentum(entityName: string): Promise<EntityMomentumRecord | null> {
+  try {
+    // Resolve slug
+    const entity = await getEntityByName(entityName);
+    const slug = entity
+      ? entity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      : entityName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    type ActivityRow = {
+      recent_signals: string;
+      previous_signals: string;
+      high_impact_recent: string;
+      recent_events: string;
+    };
+
+    const [row] = await dbQuery<ActivityRow>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '7 days'
+        )::text AS recent_signals,
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '14 days'
+            AND s.created_at <= NOW() - INTERVAL '7 days'
+        )::text AS previous_signals,
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '7 days'
+            AND s.significance_score >= 75
+        )::text AS high_impact_recent,
+        0::text AS recent_events
+      FROM signals s
+      WHERE LOWER(s.entity_name) = LOWER(${entityName})
+        AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+    `;
+
+    // Event count in recent window
+    const [evtRow] = await dbQuery<{ cnt: string }>`
+      SELECT COUNT(*)::text AS cnt
+      FROM events
+      WHERE LOWER(entity_name) = LOWER(${entityName})
+        AND timestamp > NOW() - INTERVAL '7 days'
+    `;
+
+    // Rising-momentum signals: signals in the recent window that have
+    // more supporting events in the last 7 days than in days 8–14.
+    // For simplicity and performance, we approximate by counting recent
+    // signals with ≥ 2 supporting events in the recent window.
+    const [risingRow] = await dbQuery<{ cnt: string }>`
+      SELECT COUNT(*)::text AS cnt
+      FROM signals s
+      WHERE LOWER(s.entity_name) = LOWER(${entityName})
+        AND s.created_at > NOW() - INTERVAL '7 days'
+        AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+        AND (
+          SELECT COUNT(*)
+          FROM events e
+          WHERE LOWER(e.entity_name) = LOWER(s.entity_name)
+            AND e.timestamp > NOW() - INTERVAL '7 days'
+        ) >= 2
+    `;
+
+    const input: EntityMomentumInput = {
+      recentSignalCount: parseInt(row?.recent_signals ?? '0', 10) || 0,
+      previousSignalCount: parseInt(row?.previous_signals ?? '0', 10) || 0,
+      highImpactSignalCount: parseInt(row?.high_impact_recent ?? '0', 10) || 0,
+      risingMomentumSignalCount: parseInt(risingRow?.cnt ?? '0', 10) || 0,
+      recentEventCount: parseInt(evtRow?.cnt ?? '0', 10) || 0,
+    };
+
+    return {
+      entityName,
+      slug,
+      input,
+      result: computeEntityMomentum(input),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get top entities ranked by momentum score.
+ *
+ * Strategy: query the most active entities (by recent signal count),
+ * then compute momentum for each and return sorted.
+ */
+export async function getTopMomentumEntities(limit = 5): Promise<EntityMomentumRecord[]> {
+  try {
+    // Get candidate entities — those with any signal activity in the last 14 days
+    type CandidateRow = { entity_name: string };
+    const candidates = await dbQuery<CandidateRow>`
+      SELECT entity_name
+      FROM signals
+      WHERE entity_name IS NOT NULL
+        AND entity_name != ''
+        AND created_at > NOW() - INTERVAL '14 days'
+        AND (status IS NULL OR status NOT IN ('rejected'))
+      GROUP BY entity_name
+      ORDER BY COUNT(*) DESC
+      LIMIT 20
+    `;
+
+    if (candidates.length === 0) return [];
+
+    // Compute momentum for each candidate in parallel
+    const results = await Promise.all(
+      candidates.map((c) => getEntityMomentum(c.entity_name)),
+    );
+
+    return results
+      .filter((r): r is EntityMomentumRecord => r !== null)
+      .sort((a, b) => b.result.momentumScore - a.result.momentumScore)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
 }

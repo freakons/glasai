@@ -15,8 +15,29 @@
 import { isRedisConfigured } from '@/lib/cache/redis';
 import { dbQuery } from '@/db/client';
 
-const REDIS_LOCK_KEY = 'pipeline:run:lock';
+const DEFAULT_REDIS_LOCK_KEY = 'pipeline:run:lock';
 const LOCK_TTL_SECONDS = parseInt(process.env.PIPELINE_LOCK_TTL_SECONDS ?? '300', 10);
+
+/** Stale lock age threshold — locks older than this are considered crashed and auto-cleared. */
+const STALE_LOCK_AGE_MS = (LOCK_TTL_SECONDS + 60) * 1000; // TTL + 60s grace
+
+/**
+ * Derive a Redis lock key from a scope.
+ * Different pipeline routes (pipeline/run vs intelligence/run) use separate
+ * lock keys so they never block each other.
+ */
+function redisLockKey(scope?: string): string {
+  if (!scope || scope === 'pipeline_run') return DEFAULT_REDIS_LOCK_KEY;
+  return `pipeline:${scope}:lock`;
+}
+
+/**
+ * Derive a DB lock_key from a scope.
+ */
+function dbLockKey(scope?: string): string {
+  if (!scope || scope === 'pipeline_run') return 'pipeline_run';
+  return scope;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,34 +51,40 @@ export type LockAcquireResult =
  * Try to acquire the pipeline run lock.
  * Returns { acquired: true, lockId } on success.
  * Returns { acquired: false, reason } if another run is active.
+ *
+ * @param triggeredBy  Who is acquiring (e.g. 'cron', 'admin')
+ * @param scope        Lock scope — different scopes use separate lock keys
+ *                     so pipeline/run and intelligence/run don't block each other.
+ *                     Defaults to 'pipeline_run'.
  */
-export async function acquirePipelineLock(triggeredBy: string): Promise<LockAcquireResult> {
+export async function acquirePipelineLock(triggeredBy: string, scope?: string): Promise<LockAcquireResult> {
   const lockId = `${triggeredBy}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   if (isRedisConfigured()) {
-    const result = await tryRedisLock(lockId);
+    const result = await tryRedisLock(lockId, scope);
     if (result !== null) return result;
     // Redis failed → fall through to DB
   }
 
-  return tryDbLock(lockId, triggeredBy);
+  return tryDbLock(lockId, triggeredBy, scope);
 }
 
 /**
  * Release the lock. Only releases our own lock (identified by lockId).
  * Safe to call even if lock was never acquired (noop).
  */
-export async function releasePipelineLock(lockId: string): Promise<void> {
+export async function releasePipelineLock(lockId: string, scope?: string): Promise<void> {
   if (isRedisConfigured()) {
-    const released = await tryReleaseRedisLock(lockId);
+    const released = await tryReleaseRedisLock(lockId, scope);
     if (released) return;
     // Fall through to DB release
   }
 
+  const key = dbLockKey(scope);
   try {
     await dbQuery`
       DELETE FROM pipeline_locks
-      WHERE lock_key = 'pipeline_run' AND run_id = ${lockId}
+      WHERE lock_key = ${key} AND run_id = ${lockId}
     `;
   } catch {
     // Best-effort — expired TTL will clean up
@@ -65,13 +92,80 @@ export async function releasePipelineLock(lockId: string): Promise<void> {
 }
 
 /**
+ * Force-clear a stale lock for a given scope.
+ * Returns details about what was cleared, or null if nothing was locked.
+ * Use only for manual recovery — normal runs should never need this.
+ */
+export async function forceReleasePipelineLock(scope?: string): Promise<{
+  cleared: boolean;
+  strategy?: string;
+  previousLockHolder?: string;
+  lockAge?: string;
+}> {
+  let cleared = false;
+  let previousLockHolder: string | undefined;
+  let lockAge: string | undefined;
+
+  // Try Redis first
+  if (isRedisConfigured()) {
+    try {
+      const { Redis } = await import('@upstash/redis');
+      const redis = new Redis({
+        url:   process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      });
+      const key = redisLockKey(scope);
+      const existing = await redis.get<string>(key);
+      if (existing) {
+        previousLockHolder = existing;
+        // Extract timestamp from lockId format: "triggeredBy-timestamp-random"
+        const parts = existing.split('-');
+        if (parts.length >= 2) {
+          const ts = parseInt(parts[parts.length - 2], 10);
+          if (!isNaN(ts)) {
+            lockAge = `${Math.round((Date.now() - ts) / 1000)}s`;
+          }
+        }
+        await redis.del(key);
+        cleared = true;
+        return { cleared, strategy: 'redis', previousLockHolder, lockAge };
+      }
+    } catch {
+      // Fall through to DB
+    }
+  }
+
+  // Try DB
+  const key = dbLockKey(scope);
+  try {
+    const existing = await dbQuery<{ run_id: string; locked_at: string; locked_by: string }>`
+      SELECT run_id, locked_at, locked_by FROM pipeline_locks WHERE lock_key = ${key}
+    `;
+    if (existing.length > 0) {
+      previousLockHolder = `${existing[0].locked_by} (since ${existing[0].locked_at})`;
+      const lockedAt = new Date(existing[0].locked_at).getTime();
+      lockAge = `${Math.round((Date.now() - lockedAt) / 1000)}s`;
+      await dbQuery`DELETE FROM pipeline_locks WHERE lock_key = ${key}`;
+      cleared = true;
+      return { cleared, strategy: 'db', previousLockHolder, lockAge };
+    }
+  } catch {
+    // Table may not exist
+  }
+
+  return { cleared: false };
+}
+
+/**
  * Return the current lock status for health/diagnostic purposes.
  */
-export async function getPipelineLockStatus(): Promise<{
+export async function getPipelineLockStatus(scope?: string): Promise<{
   locked: boolean;
   lockedBy?: string;
   lockedAt?: string;
   strategy?: string;
+  lockAgeSeconds?: number;
+  isStale?: boolean;
 }> {
   if (isRedisConfigured()) {
     try {
@@ -80,27 +174,48 @@ export async function getPipelineLockStatus(): Promise<{
         url:   process.env.UPSTASH_REDIS_REST_URL!,
         token: process.env.UPSTASH_REDIS_REST_TOKEN!,
       });
-      const val = await redis.get<string>(REDIS_LOCK_KEY);
-      return { locked: val !== null, lockedBy: val ?? undefined, strategy: 'redis' };
+      const key = redisLockKey(scope);
+      const val = await redis.get<string>(key);
+      if (val !== null) {
+        // Extract lock age from lockId format: "triggeredBy-timestamp-random"
+        let lockAgeSeconds: number | undefined;
+        let isStale = false;
+        const parts = val.split('-');
+        if (parts.length >= 2) {
+          const ts = parseInt(parts[parts.length - 2], 10);
+          if (!isNaN(ts)) {
+            lockAgeSeconds = Math.round((Date.now() - ts) / 1000);
+            isStale = (Date.now() - ts) > STALE_LOCK_AGE_MS;
+          }
+        }
+        return { locked: true, lockedBy: val, strategy: 'redis', lockAgeSeconds, isStale };
+      }
+      return { locked: false, strategy: 'redis' };
     } catch {
       // Fall through to DB
     }
   }
 
+  const key = dbLockKey(scope);
   try {
     // Clean expired locks before checking
     await dbQuery`DELETE FROM pipeline_locks WHERE expires_at < NOW()`;
     const rows = await dbQuery<{ locked_by: string; locked_at: string }>`
       SELECT locked_by, locked_at
       FROM pipeline_locks
-      WHERE lock_key = 'pipeline_run'
+      WHERE lock_key = ${key}
     `;
     if (rows.length > 0) {
+      const lockedAt = new Date(rows[0].locked_at).getTime();
+      const lockAgeSeconds = Math.round((Date.now() - lockedAt) / 1000);
+      const isStale = (Date.now() - lockedAt) > STALE_LOCK_AGE_MS;
       return {
         locked:   true,
         lockedBy: rows[0].locked_by,
         lockedAt: rows[0].locked_at,
         strategy: 'db',
+        lockAgeSeconds,
+        isStale,
       };
     }
   } catch {
@@ -112,7 +227,7 @@ export async function getPipelineLockStatus(): Promise<{
 
 // ── Redis lock ────────────────────────────────────────────────────────────────
 
-async function tryRedisLock(lockId: string): Promise<LockAcquireResult | null> {
+async function tryRedisLock(lockId: string, scope?: string): Promise<LockAcquireResult | null> {
   try {
     const { Redis } = await import('@upstash/redis');
     const redis = new Redis({
@@ -120,8 +235,23 @@ async function tryRedisLock(lockId: string): Promise<LockAcquireResult | null> {
       token: process.env.UPSTASH_REDIS_REST_TOKEN!,
     });
 
+    const key = redisLockKey(scope);
+
+    // Before acquiring, check if existing lock is stale and auto-clear it
+    const existingVal = await redis.get<string>(key);
+    if (existingVal) {
+      const parts = existingVal.split('-');
+      if (parts.length >= 2) {
+        const ts = parseInt(parts[parts.length - 2], 10);
+        if (!isNaN(ts) && (Date.now() - ts) > STALE_LOCK_AGE_MS) {
+          console.warn(`[pipeline/lock] Stale lock detected on ${key}: ${existingVal} (age=${Math.round((Date.now() - ts) / 1000)}s) — auto-clearing`);
+          await redis.del(key);
+        }
+      }
+    }
+
     // Atomic SET NX EX — only sets if key does not exist
-    const result = await redis.set(REDIS_LOCK_KEY, lockId, {
+    const result = await redis.set(key, lockId, {
       nx: true,
       ex: LOCK_TTL_SECONDS,
     });
@@ -130,7 +260,7 @@ async function tryRedisLock(lockId: string): Promise<LockAcquireResult | null> {
       return { acquired: true, lockId, strategy: 'redis' };
     }
 
-    const existing = await redis.get<string>(REDIS_LOCK_KEY);
+    const existing = await redis.get<string>(key);
     return {
       acquired: false,
       reason:   'pipeline_locked',
@@ -142,7 +272,7 @@ async function tryRedisLock(lockId: string): Promise<LockAcquireResult | null> {
   }
 }
 
-async function tryReleaseRedisLock(lockId: string): Promise<boolean> {
+async function tryReleaseRedisLock(lockId: string, scope?: string): Promise<boolean> {
   try {
     const { Redis } = await import('@upstash/redis');
     const redis = new Redis({
@@ -150,6 +280,7 @@ async function tryReleaseRedisLock(lockId: string): Promise<boolean> {
       token: process.env.UPSTASH_REDIS_REST_TOKEN!,
     });
 
+    const key = redisLockKey(scope);
     // Lua script: atomic check-and-delete (only delete if we own the lock)
     const script = `
       if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -158,7 +289,7 @@ async function tryReleaseRedisLock(lockId: string): Promise<boolean> {
         return 0
       end
     `;
-    await redis.eval(script, [REDIS_LOCK_KEY], [lockId]);
+    await redis.eval(script, [key], [lockId]);
     return true;
   } catch {
     return false;
@@ -167,17 +298,29 @@ async function tryReleaseRedisLock(lockId: string): Promise<boolean> {
 
 // ── DB lock ───────────────────────────────────────────────────────────────────
 
-async function tryDbLock(lockId: string, triggeredBy: string): Promise<LockAcquireResult> {
+async function tryDbLock(lockId: string, triggeredBy: string, scope?: string): Promise<LockAcquireResult> {
+  const key = dbLockKey(scope);
   try {
     // Remove any expired locks before attempting acquisition
     await dbQuery`DELETE FROM pipeline_locks WHERE expires_at < NOW()`;
+
+    // Also auto-clear stale locks (locked_at older than STALE_LOCK_AGE_MS)
+    const staleThreshold = new Date(Date.now() - STALE_LOCK_AGE_MS).toISOString();
+    const staleCleared = await dbQuery<{ run_id: string }>`
+      DELETE FROM pipeline_locks
+      WHERE lock_key = ${key} AND locked_at < ${staleThreshold}::timestamptz
+      RETURNING run_id
+    `;
+    if (staleCleared.length > 0) {
+      console.warn(`[pipeline/lock] Auto-cleared stale DB lock for ${key}: ${staleCleared[0].run_id}`);
+    }
 
     const expiresAt = new Date(Date.now() + LOCK_TTL_SECONDS * 1000).toISOString();
 
     // INSERT ON CONFLICT DO NOTHING — atomic in Postgres
     const inserted = await dbQuery<{ run_id: string }>`
       INSERT INTO pipeline_locks (lock_key, locked_at, expires_at, run_id, locked_by)
-      VALUES ('pipeline_run', NOW(), ${expiresAt}::timestamptz, ${lockId}, ${triggeredBy})
+      VALUES (${key}, NOW(), ${expiresAt}::timestamptz, ${lockId}, ${triggeredBy})
       ON CONFLICT (lock_key) DO NOTHING
       RETURNING run_id
     `;
@@ -189,7 +332,7 @@ async function tryDbLock(lockId: string, triggeredBy: string): Promise<LockAcqui
     const existing = await dbQuery<{ locked_by: string; locked_at: string }>`
       SELECT locked_by, locked_at
       FROM pipeline_locks
-      WHERE lock_key = 'pipeline_run'
+      WHERE lock_key = ${key}
     `;
     const e = existing[0];
     return {

@@ -1,5 +1,5 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
-import { getSignals, getSiteStats, getEcosystemActivitySnapshot, getSignalsMomentumBatch } from '@/db/queries';
+import { getSignals, getSiteStats, getEcosystemActivitySnapshot, getSignalsMomentumBatch, getTopMomentumEntities } from '@/db/queries';
 import { formatFundingTotal } from '@/lib/parseFundingAmount';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';
@@ -26,12 +26,13 @@ const STATS_FALLBACK = {
 };
 
 export default async function IntelligencePage() {
-  const [articles, featured, live, rawSignals, snapshot] = await Promise.all([
+  const [articles, featured, live, rawSignals, snapshot, topMomentumEntities] = await Promise.all([
     fetchArticles(),
     fetchFeaturedArticle(),
     getSiteStats().catch(() => STATS_FALLBACK),
     getSignals(50, 'standard').catch(() => []),
     getEcosystemActivitySnapshot(),
+    getTopMomentumEntities(5).catch(() => []),
   ]);
 
   // Compose the signal feed with diversity + dedup + ranking
@@ -82,7 +83,7 @@ export default async function IntelligencePage() {
         <StatCard value={sources} label="Sources" delta="Verified" color="var(--emerald-l)" glowColor="rgba(5,150,105,0.4)" />
       </div>
 
-      <EcosystemActivity snapshot={snapshot} />
+      <EcosystemActivity snapshot={snapshot} topMomentumEntities={topMomentumEntities} />
 
       {featured && <FeaturedCard article={featured} />}
 

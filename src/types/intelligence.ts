@@ -387,6 +387,17 @@ export interface Signal {
    * Persisted alongside significanceScore; null for pre-migration rows.
    */
   sourceSupportCount?: number | null;
+
+  // ── Intelligence layer fields (migration 014) ──────────────────────────────
+
+  /** Plain-language explanation of why this signal matters */
+  whyThisMatters?: string | null;
+  /** Strategic implications for decision-makers */
+  strategicImpact?: string | null;
+  /** Target audience / roles most affected */
+  whoShouldCare?: string | null;
+  /** Forward-looking assessment */
+  prediction?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

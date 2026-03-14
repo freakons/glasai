@@ -46,7 +46,8 @@ import { ingestGNews }                          from '@/services/ingestion/gnews
 import { ingestRss }                            from '@/services/ingestion/rssIngester';
 import { getRecentEvents }                      from '@/services/storage/eventStore';
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
-import { saveSignals }                          from '@/services/storage/signalStore';
+import { saveSignals, updateSignalInsight, markInsightGenerationError } from '@/services/storage/signalStore';
+import { generateSignalInsightWithMeta }        from '@/lib/intelligence/generateSignalInsight';
 import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { generatePageSnapshots }               from '@/lib/pipeline/snapshot';
 import { refreshCaches }                        from '@/lib/pipeline/cacheRefresh';
@@ -55,17 +56,19 @@ import { TimeoutError }                         from '@/lib/withTimeout';
 import type { TriggerType, RunStatus, PipelineStageResult } from '@/lib/pipeline/types';
 import { toDbStatus }                           from '@/lib/pipeline/types';
 
-// Vercel function timeout (seconds). Increase to 300 on Pro plan.
+// Vercel function timeout (seconds). 300 = max for Pro plan.
 // https://vercel.com/docs/functions/runtimes#max-duration
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // ── Stage timeout defaults (ms) ───────────────────────────────────────────────
+// With maxDuration=300 (Vercel Pro), we can afford generous per-stage timeouts.
+// Overall timeout is 290s (leaving 10s for response serialization).
 const TIMEOUT = {
-  INGEST:   parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS   ?? '30000', 10),
-  SIGNALS:  parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS  ?? '10000', 10),
-  SNAPSHOT: parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS ?? '15000', 10),
-  CACHE:    parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS    ?? '5000',  10),
-  OVERALL:  parseInt(process.env.PIPELINE_TIMEOUT_MS          ?? '55000', 10),
+  INGEST:   parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS   ?? '120000', 10),
+  SIGNALS:  parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS  ?? '30000',  10),
+  SNAPSHOT: parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS ?? '60000',  10),
+  CACHE:    parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS    ?? '10000',  10),
+  OVERALL:  parseInt(process.env.PIPELINE_TIMEOUT_MS          ?? '290000', 10),
 } as const;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -464,11 +467,13 @@ export async function POST(req: NextRequest) {
       }
 
       // Stage 2 — Signal generation
+      let generatedSigs: Awaited<ReturnType<typeof generateSignalsFromEvents>> = [];
       const signals = await runStage(
         'signals',
         async () => {
           const events  = await getRecentEvents(500);
           const sigs    = generateSignalsFromEvents(events);
+          generatedSigs = sigs;
           const saved   = await saveSignals(sigs);
           return { eventsLoaded: events.length, signalsSaved: saved };
         },
@@ -484,6 +489,67 @@ export async function POST(req: NextRequest) {
           stage: 'signals', status: 'ok', durationMs: signals.durationMs,
           eventsLoaded: signals.result!.eventsLoaded, signalsGenerated,
         });
+      }
+
+      // Stage 2b — Intelligence layer ("Why This Matters") — non-blocking
+      // Only process newly generated signals; failures are swallowed.
+      // Signals with existing insight (insight_generated=true) are skipped.
+      // Dedup/reuse is handled inside generateSignalInsightWithMeta.
+      if (generatedSigs.length > 0) {
+        const intel = await runStage(
+          'intelligence',
+          async () => {
+            let insightsGenerated = 0;
+            let insightsReused = 0;
+            let insightsFailed = 0;
+            for (const sig of generatedSigs) {
+              try {
+                const result = await generateSignalInsightWithMeta({
+                  title: sig.title,
+                  summary: sig.description,
+                  entities: sig.affectedEntities ?? [],
+                  signalType: sig.type,
+                  direction: sig.direction,
+                });
+
+                if (result.error) {
+                  // Generation failed — record error for monitoring
+                  await markInsightGenerationError(sig.id, result.error);
+                  insightsFailed++;
+                  continue;
+                }
+
+                const insight = result.insight;
+                // Only persist if at least one field was generated
+                if (insight.why_this_matters || insight.strategic_impact || insight.who_should_care) {
+                  await updateSignalInsight(sig.id, insight);
+                  insightsGenerated++;
+                  if (result.reused) insightsReused++;
+                }
+              } catch {
+                // Per-signal failure is non-fatal
+                insightsFailed++;
+              }
+            }
+            return {
+              insightsGenerated,
+              insightsReused,
+              insightsFailed,
+              signalsProcessed: generatedSigs.length,
+            };
+          },
+          TIMEOUT.SIGNALS,
+          correlationId,
+        );
+        if (intel.error) {
+          // Intelligence failure is non-fatal — log but don't increment errorsCount
+          stages.push({ stage: 'intelligence', status: 'error', durationMs: intel.durationMs, error: intel.error, timedOut: intel.timedOut });
+        } else {
+          stages.push({
+            stage: 'intelligence', status: 'ok', durationMs: intel.durationMs,
+            ...intel.result!,
+          });
+        }
       }
 
       // Stage 3 — Snapshot generation

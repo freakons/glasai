@@ -27,7 +27,7 @@ A professional-grade AI intelligence terminal tracking regulation, model release
 |---|---|
 | `GET /api/news` | Proxies GNews API server-side — key never in client |
 | `POST /api/subscribe` | Adds email to Resend audience |
-| `GET /api/digest` | Sends weekly intelligence digest (cron: Fridays 09:00 UTC) |
+| `GET /api/alerts/send-digest` | Sends daily intelligence digest (cron: 07:00 UTC daily) |
 
 ---
 

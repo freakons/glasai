@@ -46,7 +46,7 @@
 
 ### 1d. Operational Readiness — Good Foundation
 
-- **Vercel cron scheduling**: Three crons configured (pipeline hourly, intelligence every 2h, digest weekly Friday 09:00 UTC).
+- **Vercel cron scheduling**: Three crons configured (pipeline hourly, intelligence every 2h, digest daily 07:00 UTC).
 - **Pipeline observability**: Every run (including skipped/dry-run) recorded in `pipeline_runs` with correlation IDs, timing, error summaries.
 - **Admin system page** (`/admin/system`): Live deployment diagnostics showing DB status, signal counts, data source, environment vars.
 - **Operator checklist** (`docs/operator-checklist.md`): Step-by-step Vercel/Neon setup instructions.
@@ -101,7 +101,7 @@ Several major pages still serve static seed data when the DB tables are empty:
 
 - `alert_rules` table described in infrastructure but not in the live schema.
 - No mechanism for users to subscribe to entity-specific or topic-specific alerts.
-- Weekly digest exists (`/api/digest`) but sends to the Resend audience list, not personalized.
+- Daily digest implemented via `/api/alerts/send-digest` with per-user personalized alerts (resolved in current sprint).
 
 ### 2e. Admin System Page Unprotected — LOW-MEDIUM
 

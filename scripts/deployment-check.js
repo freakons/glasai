@@ -19,8 +19,10 @@ const REQUIRED_VARS = [
 const OPTIONAL_VARS = [
   'UPSTASH_REDIS_REST_URL',
   'UPSTASH_REDIS_REST_TOKEN',
+  'GROQ_API_KEY',
   'GROK_API_KEY',
   'OPENAI_API_KEY',
+  'RESEND_KEY',
 ];
 
 function run() {
