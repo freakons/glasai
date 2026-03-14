@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
+import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 import type { SignalWithRankMeta } from '@/lib/signals/feedComposer';
 import type { SignalExplanation } from '@/lib/signals/explanationLayer';
 
@@ -42,6 +43,15 @@ export function SignalCard({ signal }: SignalCardProps) {
                 {explanation?.importanceLabel ?? 'Notable'}
               </span>
             )}
+            <SignalImpactBadge
+              signal={{
+                significanceScore: signal.significanceScore,
+                confidenceScore: signal.confidence,
+                sourceSupportCount: signal.sourceSupportCount,
+                affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
+              }}
+              showLabel={false}
+            />
           </div>
           <div className="nc-indicators">
             {sourceCount != null && sourceCount > 1 && (

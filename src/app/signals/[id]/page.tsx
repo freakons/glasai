@@ -8,6 +8,7 @@ import { EvidencePanel } from '@/components/signals/EvidencePanel';
 import { CorroborationIndicator, computeCorroboration } from '@/components/signals/CorroborationIndicator';
 import { ConfidenceBreakdown } from '@/components/signals/ConfidenceBreakdown';
 import { SourceArticlesPanel } from '@/components/signals/SourceArticlesPanel';
+import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
 import { slugify } from '@/utils/sanitize';
 
@@ -111,6 +112,12 @@ export default async function SignalDetailPage(
               Verified
             </span>
           )}
+          <SignalImpactBadge signal={{
+            significanceScore: signal.significanceScore,
+            confidenceScore: signal.confidence,
+            sourceSupportCount: signal.sourceSupportCount,
+            affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
+          }} />
         </div>
 
         {/* Title */}
