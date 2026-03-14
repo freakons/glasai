@@ -2507,3 +2507,150 @@ export async function recordDigestSend(userId: string, forDate: string): Promise
     ON CONFLICT (user_id, sent_for_date) DO NOTHING
   `;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Momentum
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  computeEntityMomentum,
+  type EntityMomentumInput,
+  type EntityMomentumResult,
+} from '@/lib/entities/computeEntityMomentum';
+
+export interface EntityMomentumRecord {
+  entityName: string;
+  slug: string;
+  input: EntityMomentumInput;
+  result: EntityMomentumResult;
+}
+
+/**
+ * Gather momentum inputs for a single entity and compute the score.
+ *
+ * Uses two 7-day windows:
+ *   recent   = NOW() - 7 days  → NOW()
+ *   previous = NOW() - 14 days → NOW() - 7 days
+ *
+ * Counts:
+ *   - total signals per window
+ *   - high-impact signals (significance_score ≥ 75) in recent window
+ *   - rising-momentum signals in recent window (via event-count comparison)
+ *   - events in recent window
+ */
+export async function getEntityMomentum(entityName: string): Promise<EntityMomentumRecord | null> {
+  try {
+    // Resolve slug
+    const entity = await getEntityByName(entityName);
+    const slug = entity
+      ? entity.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      : entityName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    type ActivityRow = {
+      recent_signals: string;
+      previous_signals: string;
+      high_impact_recent: string;
+      recent_events: string;
+    };
+
+    const [row] = await dbQuery<ActivityRow>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '7 days'
+        )::text AS recent_signals,
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '14 days'
+            AND s.created_at <= NOW() - INTERVAL '7 days'
+        )::text AS previous_signals,
+        COUNT(*) FILTER (
+          WHERE s.created_at > NOW() - INTERVAL '7 days'
+            AND s.significance_score >= 75
+        )::text AS high_impact_recent,
+        0::text AS recent_events
+      FROM signals s
+      WHERE LOWER(s.entity_name) = LOWER(${entityName})
+        AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+    `;
+
+    // Event count in recent window
+    const [evtRow] = await dbQuery<{ cnt: string }>`
+      SELECT COUNT(*)::text AS cnt
+      FROM events
+      WHERE LOWER(entity_name) = LOWER(${entityName})
+        AND timestamp > NOW() - INTERVAL '7 days'
+    `;
+
+    // Rising-momentum signals: signals in the recent window that have
+    // more supporting events in the last 7 days than in days 8–14.
+    // For simplicity and performance, we approximate by counting recent
+    // signals with ≥ 2 supporting events in the recent window.
+    const [risingRow] = await dbQuery<{ cnt: string }>`
+      SELECT COUNT(*)::text AS cnt
+      FROM signals s
+      WHERE LOWER(s.entity_name) = LOWER(${entityName})
+        AND s.created_at > NOW() - INTERVAL '7 days'
+        AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+        AND (
+          SELECT COUNT(*)
+          FROM events e
+          WHERE LOWER(e.entity_name) = LOWER(s.entity_name)
+            AND e.timestamp > NOW() - INTERVAL '7 days'
+        ) >= 2
+    `;
+
+    const input: EntityMomentumInput = {
+      recentSignalCount: parseInt(row?.recent_signals ?? '0', 10) || 0,
+      previousSignalCount: parseInt(row?.previous_signals ?? '0', 10) || 0,
+      highImpactSignalCount: parseInt(row?.high_impact_recent ?? '0', 10) || 0,
+      risingMomentumSignalCount: parseInt(risingRow?.cnt ?? '0', 10) || 0,
+      recentEventCount: parseInt(evtRow?.cnt ?? '0', 10) || 0,
+    };
+
+    return {
+      entityName,
+      slug,
+      input,
+      result: computeEntityMomentum(input),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get top entities ranked by momentum score.
+ *
+ * Strategy: query the most active entities (by recent signal count),
+ * then compute momentum for each and return sorted.
+ */
+export async function getTopMomentumEntities(limit = 5): Promise<EntityMomentumRecord[]> {
+  try {
+    // Get candidate entities — those with any signal activity in the last 14 days
+    type CandidateRow = { entity_name: string };
+    const candidates = await dbQuery<CandidateRow>`
+      SELECT entity_name
+      FROM signals
+      WHERE entity_name IS NOT NULL
+        AND entity_name != ''
+        AND created_at > NOW() - INTERVAL '14 days'
+        AND (status IS NULL OR status NOT IN ('rejected'))
+      GROUP BY entity_name
+      ORDER BY COUNT(*) DESC
+      LIMIT 20
+    `;
+
+    if (candidates.length === 0) return [];
+
+    // Compute momentum for each candidate in parallel
+    const results = await Promise.all(
+      candidates.map((c) => getEntityMomentum(c.entity_name)),
+    );
+
+    return results
+      .filter((r): r is EntityMomentumRecord => r !== null)
+      .sort((a, b) => b.result.momentumScore - a.result.momentumScore)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
