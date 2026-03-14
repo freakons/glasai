@@ -77,6 +77,12 @@ interface SignalRow {
   ctx_generation_error?: string | null;
   ctx_created_at?: string | null;
   ctx_updated_at?: string | null;
+
+  // Intelligence layer (migration 014) — nullable
+  why_this_matters?: string | null;
+  strategic_impact?: string | null;
+  who_should_care?: string | null;
+  prediction?: string | null;
 }
 
 interface EventRow {
@@ -171,6 +177,10 @@ function rowToSignal(row: SignalRow): Signal {
     significanceScore:  row.significance_score ?? undefined,
     sourceSupportCount: row.source_support_count ?? undefined,
     ...(context !== undefined ? { context } : {}),
+    whyThisMatters:  row.why_this_matters ?? undefined,
+    strategicImpact: row.strategic_impact ?? undefined,
+    whoShouldCare:   row.who_should_care ?? undefined,
+    prediction:      row.prediction ?? undefined,
   };
 }
 
@@ -299,6 +309,10 @@ export async function getSignals(
           s.created_at,
           s.significance_score,
           s.source_support_count,
+          s.why_this_matters,
+          s.strategic_impact,
+          s.who_should_care,
+          s.prediction,
           sc.id                     AS ctx_id,
           sc.summary                AS ctx_summary,
           sc.why_it_matters         AS ctx_why_it_matters,
@@ -338,7 +352,11 @@ export async function getSignals(
         date,
         created_at,
         significance_score,
-        source_support_count
+        source_support_count,
+        why_this_matters,
+        strategic_impact,
+        who_should_care,
+        prediction
       FROM signals
       WHERE status IS NULL OR status NOT IN ('rejected')
       ORDER BY created_at DESC
@@ -485,7 +503,8 @@ export async function getSignalById(id: string): Promise<Signal | null> {
     SELECT
       id, title, summary, description, category, signal_type,
       entity_id, entity_name, confidence, confidence_score,
-      date, created_at, significance_score, source_support_count
+      date, created_at, significance_score, source_support_count,
+      why_this_matters, strategic_impact, who_should_care, prediction
     FROM signals
     WHERE id = ${id}
     LIMIT 1
@@ -510,7 +529,8 @@ export async function getRelatedSignals(
     SELECT
       id, title, summary, description, category, signal_type,
       entity_id, entity_name, confidence, confidence_score,
-      date, created_at, significance_score, source_support_count
+      date, created_at, significance_score, source_support_count,
+      why_this_matters, strategic_impact, who_should_care, prediction
     FROM signals
     WHERE LOWER(entity_name) = LOWER(${entityName})
       AND id != ${signalId}
@@ -663,7 +683,8 @@ export async function getSignalsForEvent(
       SELECT
         id, title, summary, description, category, signal_type,
         entity_id, entity_name, confidence, confidence_score,
-        date, created_at, significance_score, source_support_count
+        date, created_at, significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM combined
       ORDER BY significance_score DESC NULLS LAST, created_at DESC
       LIMIT ${safeLimit}
@@ -813,7 +834,8 @@ export async function getSignalsForEntity(
           s.id, s.title, s.summary, s.description,
           s.category, s.signal_type, s.entity_id, s.entity_name,
           s.confidence, s.confidence_score, s.date, s.created_at,
-          s.significance_score, s.source_support_count
+          s.significance_score, s.source_support_count,
+          s.why_this_matters, s.strategic_impact, s.who_should_care, s.prediction
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
@@ -831,7 +853,8 @@ export async function getSignalsForEntity(
         id, title, summary, description,
         category, signal_type, entity_id, entity_name,
         confidence, confidence_score, date, created_at,
-        significance_score, source_support_count
+        significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM signals
       WHERE LOWER(entity_name) = LOWER(${entityName})
         AND (status IS NULL OR status NOT IN ('rejected'))
@@ -869,7 +892,8 @@ export async function getSignalsForEntities(
           s.id, s.title, s.summary, s.description,
           s.category, s.signal_type, s.entity_id, s.entity_name,
           s.confidence, s.confidence_score, s.date, s.created_at,
-          s.significance_score, s.source_support_count
+          s.significance_score, s.source_support_count,
+          s.why_this_matters, s.strategic_impact, s.who_should_care, s.prediction
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
@@ -888,7 +912,8 @@ export async function getSignalsForEntities(
         id, title, summary, description,
         category, signal_type, entity_id, entity_name,
         confidence, confidence_score, date, created_at,
-        significance_score, source_support_count
+        significance_score, source_support_count,
+        why_this_matters, strategic_impact, who_should_care, prediction
       FROM signals
       WHERE LOWER(entity_name) = ANY(${lowerNames})
         AND (status IS NULL OR status NOT IN ('rejected'))
@@ -2005,6 +2030,8 @@ export interface AlertRecord {
   priority: number;
   createdAt: string;
   read: boolean;
+  /** Intelligence layer: why this signal matters (from migration 014) */
+  whyThisMatters?: string | null;
 }
 
 function mapAlertRow(row: AlertRow): AlertRecord {
@@ -2400,17 +2427,22 @@ export async function getDigestAlertsForUser(
 ): Promise<AlertRecord[]> {
   if (!(await tableExists('alerts'))) return [];
 
-  const rows = await dbQuery<AlertRow>`
-    SELECT id, user_id, type, entity_name, signal_id, trend_id,
-           title, message, priority, created_at, read
-    FROM alerts
-    WHERE user_id = ${userId}
-      AND type = ANY(${PERSONAL_DIGEST_TYPES})
-      AND created_at > ${since}
-    ORDER BY priority DESC, created_at DESC
+  const rows = await dbQuery<AlertRow & { sig_why_this_matters?: string | null }>`
+    SELECT a.id, a.user_id, a.type, a.entity_name, a.signal_id, a.trend_id,
+           a.title, a.message, a.priority, a.created_at, a.read,
+           s.why_this_matters AS sig_why_this_matters
+    FROM alerts a
+    LEFT JOIN signals s ON s.id = a.signal_id
+    WHERE a.user_id = ${userId}
+      AND a.type = ANY(${PERSONAL_DIGEST_TYPES})
+      AND a.created_at > ${since}
+    ORDER BY a.priority DESC, a.created_at DESC
     LIMIT 50
   `;
-  return rows.map(mapAlertRow);
+  return rows.map((r) => ({
+    ...mapAlertRow(r),
+    whyThisMatters: r.sig_why_this_matters ?? undefined,
+  }));
 }
 
 /**
@@ -2423,17 +2455,22 @@ export async function getTopPlatformDigestAlerts(
 ): Promise<AlertRecord[]> {
   if (!(await tableExists('alerts'))) return [];
 
-  const rows = await dbQuery<AlertRow>`
-    SELECT id, user_id, type, entity_name, signal_id, trend_id,
-           title, message, priority, created_at, read
-    FROM alerts
-    WHERE user_id IS NULL
-      AND type = ANY(${PLATFORM_DIGEST_TYPES})
-      AND created_at > ${since}
-    ORDER BY priority DESC, created_at DESC
+  const rows = await dbQuery<AlertRow & { sig_why_this_matters?: string | null }>`
+    SELECT a.id, a.user_id, a.type, a.entity_name, a.signal_id, a.trend_id,
+           a.title, a.message, a.priority, a.created_at, a.read,
+           s.why_this_matters AS sig_why_this_matters
+    FROM alerts a
+    LEFT JOIN signals s ON s.id = a.signal_id
+    WHERE a.user_id IS NULL
+      AND a.type = ANY(${PLATFORM_DIGEST_TYPES})
+      AND a.created_at > ${since}
+    ORDER BY a.priority DESC, a.created_at DESC
     LIMIT ${limit}
   `;
-  return rows.map(mapAlertRow);
+  return rows.map((r) => ({
+    ...mapAlertRow(r),
+    whyThisMatters: r.sig_why_this_matters ?? undefined,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

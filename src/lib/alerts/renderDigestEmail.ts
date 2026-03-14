@@ -68,6 +68,7 @@ function alertRow(alert: AlertRecord, baseUrl: string): string {
           <a href="${detailUrl}" style="color:#eeeef8;text-decoration:none;">${escapeHtml(alert.title)}</a>
         </div>
         <div style="font-size:12.5px;color:#8888a8;line-height:1.6;">${escapeHtml(truncate(alert.message, 180))}</div>
+        ${alert.whyThisMatters ? `<div style="font-size:11.5px;color:#818cf8;line-height:1.5;margin-top:6px;font-style:italic;">Why this matters: ${escapeHtml(truncate(alert.whyThisMatters, 150))}</div>` : ''}
       </td>
     </tr>`;
 }

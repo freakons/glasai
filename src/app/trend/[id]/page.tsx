@@ -119,6 +119,37 @@ export default async function TrendPage({ params }: TrendPageProps) {
         </p>
       </div>
 
+      {/* Trend Intelligence — synthesized from signal intelligence fields */}
+      {(() => {
+        const insights = cluster.signals
+          .filter((s) => s.whyThisMatters || s.strategicImpact)
+          .slice(0, 3);
+        if (insights.length === 0) return null;
+        return (
+          <div style={{ ...GLASS_CARD, marginBottom: 20 }}>
+            <div style={SECTION_HEADER}>Trend Intelligence</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {insights.map((s) => (
+                <div key={s.id} style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+                  {s.whyThisMatters && (
+                    <p style={{ margin: '0 0 4px' }}>
+                      <span style={{ fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--indigo-l, #818cf8)', marginRight: 6 }}>Why this matters</span>
+                      {s.whyThisMatters}
+                    </p>
+                  )}
+                  {s.strategicImpact && (
+                    <p style={{ margin: 0, color: 'var(--text2)', fontSize: 12 }}>
+                      <span style={{ fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)', marginRight: 6 }}>Impact</span>
+                      {s.strategicImpact}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Trend Activity */}
       <div style={{ ...GLASS_CARD, marginBottom: 20 }}>
         <div style={SECTION_HEADER}>Trend Activity</div>

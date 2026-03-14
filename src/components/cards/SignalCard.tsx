@@ -96,11 +96,29 @@ export function SignalCard({ signal }: SignalCardProps) {
         {/* Summary */}
         <p className="nc-body">{signal.summary}</p>
 
-        {/* Why it matters (inline, always visible if present) */}
-        {(explanation?.whyThisMatters || signal.context?.whyItMatters) && (
+        {/* Why This Matters — intelligence layer (migration 014) */}
+        {(signal.whyThisMatters || explanation?.whyThisMatters || signal.context?.whyItMatters) && (
           <div className="nc-why">
-            <span className="nc-why-label">Why it matters</span>
-            {explanation?.whyThisMatters ?? signal.context?.whyItMatters}
+            <span className="nc-why-label">Why this matters</span>
+            {signal.whyThisMatters ?? explanation?.whyThisMatters ?? signal.context?.whyItMatters}
+          </div>
+        )}
+
+        {/* Strategic impact + who should care (collapsible intelligence) */}
+        {(signal.strategicImpact || signal.whoShouldCare) && (
+          <div className="nc-intel" style={{ marginTop: 6, fontSize: 12, color: 'var(--text2)', lineHeight: 1.55 }}>
+            {signal.strategicImpact && (
+              <div style={{ marginBottom: 4 }}>
+                <span style={{ fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)', marginRight: 6 }}>Strategic impact</span>
+                {signal.strategicImpact}
+              </div>
+            )}
+            {signal.whoShouldCare && (
+              <div>
+                <span style={{ fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text3)', marginRight: 6 }}>Who should care</span>
+                {signal.whoShouldCare}
+              </div>
+            )}
           </div>
         )}
 
