@@ -1,10 +1,15 @@
 /**
  * Omterminal — Daily Intelligence Digest Delivery
  *
- * GET /api/alerts/send-digest?secret=<CRON_SECRET>
+ * GET /api/alerts/send-digest
  *
- * Cron-safe endpoint that sends one digest email per enabled subscriber.
- * Designed to be called once per day (e.g. via Vercel Cron).
+ * Protected cron endpoint that sends one digest email per enabled subscriber.
+ * Designed to be called once per day via Vercel Cron.
+ *
+ * Auth:
+ *   Accepts CRON_SECRET via Authorization: Bearer header (Vercel cron)
+ *   or ?secret= query param (manual testing).
+ *   Rejects all requests when CRON_SECRET is not configured.
  *
  * Behavior:
  *   1. Collects all enabled email subscriptions
@@ -17,6 +22,7 @@
  *   - If RESEND_KEY is missing, returns a graceful "not configured" response
  *   - If a user has no alerts, skips them
  *   - If already sent today, skips the user
+ *   - Never crashes the job for one bad subscription/email
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,14 +40,26 @@ export const runtime = 'nodejs';
 const RESEND_API = 'https://api.resend.com/emails';
 
 export async function GET(req: NextRequest) {
-  // ── Auth: accept CRON_SECRET via header or query param ────────────────
-  const authHeader = req.headers.get('authorization') || '';
-  const cronSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const querySecret = new URL(req.url).searchParams.get('secret') || '';
-  const expected = process.env.CRON_SECRET || '';
+  // ── Auth: require CRON_SECRET ──────────────────────────────────────────
+  const expected = process.env.CRON_SECRET ?? '';
 
-  if (expected && cronSecret !== expected && querySecret !== expected) {
-    return new NextResponse('Unauthorized', { status: 401 });
+  if (!expected) {
+    console.error('[send-digest] CRON_SECRET is not configured — rejecting request');
+    return NextResponse.json(
+      { ok: false, error: 'Server misconfiguration' },
+      { status: 500 },
+    );
+  }
+
+  const authHeader = req.headers.get('authorization') || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const querySecret = new URL(req.url).searchParams.get('secret') || '';
+
+  if (bearerToken !== expected && querySecret !== expected) {
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 },
+    );
   }
 
   // ── Check Resend availability ────────────────────────────────────────
@@ -52,6 +70,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       sent: 0,
       skipped: 0,
+      failed: 0,
       reason: 'RESEND_KEY not configured',
     });
   }
@@ -65,7 +84,15 @@ export async function GET(req: NextRequest) {
     // ── Get subscribers ────────────────────────────────────────────────
     const subscriptions = await getEnabledEmailSubscriptions();
     if (subscriptions.length === 0) {
-      return NextResponse.json({ ok: true, sent: 0, skipped: 0, reason: 'No subscribers' });
+      console.log('[send-digest] No enabled subscribers — nothing to send');
+      return NextResponse.json({
+        ok: true,
+        total: 0,
+        sent: 0,
+        skippedNoAlerts: 0,
+        skippedAlreadySent: 0,
+        failed: 0,
+      });
     }
 
     // ── Time window: last 24 hours ─────────────────────────────────────
@@ -76,14 +103,15 @@ export async function GET(req: NextRequest) {
     const platformAlerts = await getTopPlatformDigestAlerts(since, 15);
 
     let sent = 0;
-    let skipped = 0;
-    const errors: string[] = [];
+    let skippedNoAlerts = 0;
+    let skippedAlreadySent = 0;
+    let failed = 0;
 
     for (const sub of subscriptions) {
       try {
         // Dedup: skip if already sent today
         if (await hasDigestBeenSent(sub.userId, today)) {
-          skipped++;
+          skippedAlreadySent++;
           continue;
         }
 
@@ -92,14 +120,14 @@ export async function GET(req: NextRequest) {
 
         // Skip users with no alerts at all
         if (personalAlerts.length === 0 && platformAlerts.length === 0) {
-          skipped++;
+          skippedNoAlerts++;
           continue;
         }
 
         // Render email
         const html = renderDigestEmail({ personalAlerts, platformAlerts, baseUrl });
         if (!html) {
-          skipped++;
+          skippedNoAlerts++;
           continue;
         }
 
@@ -126,29 +154,31 @@ export async function GET(req: NextRequest) {
           sent++;
         } else {
           const errBody = await res.text().catch(() => 'unknown');
-          errors.push(`${sub.email}: HTTP ${res.status} — ${errBody}`);
+          console.warn(`[send-digest] Resend API error for user ${sub.userId}: HTTP ${res.status} — ${errBody}`);
+          failed++;
         }
       } catch (err) {
-        errors.push(`${sub.email}: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[send-digest] Error processing user ${sub.userId}:`, err instanceof Error ? err.message : String(err));
+        failed++;
       }
     }
 
-    const result: Record<string, unknown> = {
+    const summary = {
       ok: true,
-      sent,
-      skipped,
       total: subscriptions.length,
+      sent,
+      skippedNoAlerts,
+      skippedAlreadySent,
+      failed,
     };
-    if (errors.length > 0) {
-      result.errors = errors;
-      console.warn('[send-digest] Some sends failed:', errors);
-    }
 
-    return NextResponse.json(result);
+    console.log('[send-digest] Digest run complete:', JSON.stringify(summary));
+
+    return NextResponse.json(summary);
   } catch (err) {
     console.error('[send-digest] Fatal error:', err);
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      { ok: false, error: 'Internal digest processing error' },
       { status: 500 },
     );
   }

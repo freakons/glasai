@@ -447,7 +447,7 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_email_subs_enabled
      ON user_email_subscriptions (is_enabled) WHERE is_enabled = TRUE`,
 
-  // ── Migration 012b: Digest Send Tracking ───────────────────────────────
+  // ── Migration 013: Digest Send Tracking ────────────────────────────────
   `CREATE TABLE IF NOT EXISTS digest_sends (
     id            SERIAL       PRIMARY KEY,
     user_id       TEXT         NOT NULL,

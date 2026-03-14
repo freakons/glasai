@@ -2429,7 +2429,7 @@ export async function getTopPlatformDigestAlerts(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Digest Send Tracking (migration 012b)
+// Digest Send Tracking (migration 013)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
