@@ -414,6 +414,21 @@ const STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_alerts_dedup_signal ON alerts (type, signal_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_alerts_dedup_trend  ON alerts (type, trend_id, created_at DESC)`,
   `UPDATE alerts SET type = 'signal_rising_momentum' WHERE type = 'signal_momentum'`,
+
+  // ── Migration 011: Server-side persistent watchlists ────────────────────
+  `CREATE TABLE IF NOT EXISTS user_watchlists (
+    id           SERIAL       PRIMARY KEY,
+    user_id      TEXT         NOT NULL,
+    entity_slug  TEXT         NOT NULL,
+    entity_name  TEXT         NOT NULL,
+    sector       TEXT,
+    country      TEXT,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_watchlists_user_entity
+     ON user_watchlists (user_id, entity_slug)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_watchlists_user_id
+     ON user_watchlists (user_id, created_at DESC)`,
 ];
 
 /**
@@ -472,6 +487,8 @@ const TABLES_CREATED = [
   'signals — significance indexes (significance_score, significance_score+created_at)',
   // migration 009
   'alerts',
+  // migration 011
+  'user_watchlists',
 ];
 
 export async function POST(req: NextRequest) {

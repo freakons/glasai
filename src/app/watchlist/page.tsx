@@ -85,7 +85,7 @@ export default function WatchlistPage() {
           Your <span className="ph-hi">Watchlist</span>
         </h1>
         <p style={{ fontSize: 14, color: 'var(--text2)', lineHeight: 1.7, maxWidth: 560 }}>
-          Entities you&apos;re tracking. Data is stored locally in your browser.
+          Entities you&apos;re tracking. Your watchlist syncs across devices automatically.
         </p>
       </div>
 

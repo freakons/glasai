@@ -2073,3 +2073,129 @@ export async function markAlertRead(id: string): Promise<void> {
 export async function markAllAlertsRead(): Promise<void> {
   await dbQuery`UPDATE alerts SET read = true WHERE read = false`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Watchlists (migration 011)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WatchlistRow {
+  id: number;
+  user_id: string;
+  entity_slug: string;
+  entity_name: string;
+  sector: string | null;
+  country: string | null;
+  created_at: string;
+}
+
+export interface WatchlistEntity {
+  slug: string;
+  name: string;
+  sector?: string;
+  country?: string;
+  addedAt: string;
+}
+
+function rowToWatchlistEntity(row: WatchlistRow): WatchlistEntity {
+  return {
+    slug: row.entity_slug,
+    name: row.entity_name,
+    ...(row.sector ? { sector: row.sector } : {}),
+    ...(row.country ? { country: row.country } : {}),
+    addedAt: row.created_at,
+  };
+}
+
+/**
+ * Fetch all watched entities for a user, ordered by most recently added.
+ */
+export async function getWatchlistForUser(userId: string): Promise<WatchlistEntity[]> {
+  if (!(await tableExists('user_watchlists'))) return [];
+
+  const rows = await dbQuery<WatchlistRow>`
+    SELECT id, user_id, entity_slug, entity_name, sector, country, created_at
+    FROM user_watchlists
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToWatchlistEntity);
+}
+
+/**
+ * Add an entity to a user's watchlist.
+ * Safely handles duplicates via ON CONFLICT DO NOTHING.
+ */
+export async function addWatchlistEntity(
+  userId: string,
+  entitySlug: string,
+  entityName: string,
+  sector?: string,
+  country?: string,
+): Promise<void> {
+  await dbQuery`
+    INSERT INTO user_watchlists (user_id, entity_slug, entity_name, sector, country)
+    VALUES (${userId}, ${entitySlug}, ${entityName}, ${sector ?? null}, ${country ?? null})
+    ON CONFLICT (user_id, entity_slug) DO NOTHING
+  `;
+}
+
+/**
+ * Remove an entity from a user's watchlist.
+ */
+export async function removeWatchlistEntity(
+  userId: string,
+  entitySlug: string,
+): Promise<void> {
+  await dbQuery`
+    DELETE FROM user_watchlists
+    WHERE user_id = ${userId} AND entity_slug = ${entitySlug}
+  `;
+}
+
+/**
+ * Check whether a specific entity is on a user's watchlist.
+ */
+export async function isEntityWatched(
+  userId: string,
+  entitySlug: string,
+): Promise<boolean> {
+  if (!(await tableExists('user_watchlists'))) return false;
+
+  const rows = await dbQuery<{ exists: boolean }>`
+    SELECT EXISTS(
+      SELECT 1 FROM user_watchlists
+      WHERE user_id = ${userId} AND entity_slug = ${entitySlug}
+    ) AS exists
+  `;
+  return rows[0]?.exists === true;
+}
+
+/**
+ * Bulk-import watchlist entities for a user (e.g. migrating from localStorage).
+ * Skips duplicates via ON CONFLICT DO NOTHING.
+ */
+export async function bulkImportWatchlist(
+  userId: string,
+  entities: Array<{ slug: string; name: string; sector?: string; country?: string; addedAt?: string }>,
+): Promise<number> {
+  if (entities.length === 0) return 0;
+
+  let imported = 0;
+  for (const entity of entities) {
+    const rows = await dbQuery<{ id: number }>`
+      INSERT INTO user_watchlists (user_id, entity_slug, entity_name, sector, country, created_at)
+      VALUES (
+        ${userId},
+        ${entity.slug},
+        ${entity.name},
+        ${entity.sector ?? null},
+        ${entity.country ?? null},
+        ${entity.addedAt ?? new Date().toISOString()}
+      )
+      ON CONFLICT (user_id, entity_slug) DO NOTHING
+      RETURNING id
+    `;
+    if (rows.length > 0) imported++;
+  }
+  return imported;
+}
