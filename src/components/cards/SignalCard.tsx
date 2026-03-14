@@ -1,6 +1,10 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalContextPreview } from '@/components/signals/SignalContextPreview';
 import type { SignalWithRankMeta } from '@/lib/signals/feedComposer';
 import type { SignalExplanation } from '@/lib/signals/explanationLayer';
 
@@ -14,21 +18,30 @@ interface SignalCardProps {
 
 /**
  * SignalCard — Intelligence feed card with significance, corroboration,
- * and explanation indicators.  Renders signals from the composed feed
- * with visual cues for importance level, source coverage, and analyst
- * context.
+ * explanation indicators, and inline context preview.  Renders signals
+ * from the composed feed with visual cues for importance level, source
+ * coverage, and analyst context.
  */
 export function SignalCard({ signal }: SignalCardProps) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   const tier = signal._significanceTier ?? 'standard';
   const sourceCount = signal._sourceCount ?? signal.sourceSupportCount;
   const explanation = signal.explanation;
+  const context = signal.context ?? null;
+
+  // Show preview toggle when context exists OR when we want to show the fallback
+  const hasContextFields = Boolean(
+    context?.whyItMatters || context?.implications?.length || context?.sourceBasis
+  );
 
   // Route to signal detail page
   const href = `/signals/${encodeURIComponent(signal.id)}`;
 
   return (
-    <Link href={href} className="nc-link">
-      <div className={`nc${tier === 'critical' ? ' nc-critical' : tier === 'high' ? ' nc-high' : ''}`}>
+    <div className={`nc${tier === 'critical' ? ' nc-critical' : tier === 'high' ? ' nc-high' : ''}`}>
+      {/* Clickable area for navigation */}
+      <Link href={href} className="nc-link">
         {/* Top meta row */}
         <div className="nc-top">
           <div className="nc-badges">
@@ -78,7 +91,7 @@ export function SignalCard({ signal }: SignalCardProps) {
         {/* Summary */}
         <p className="nc-body">{signal.summary}</p>
 
-        {/* Why it matters */}
+        {/* Why it matters (inline, always visible if present) */}
         {(explanation?.whyThisMatters || signal.context?.whyItMatters) && (
           <div className="nc-why">
             <span className="nc-why-label">Why it matters</span>
@@ -92,8 +105,33 @@ export function SignalCard({ signal }: SignalCardProps) {
             <span className="nc-affected-label">Affects:</span> {explanation.affectedEntities.join(', ')}
           </div>
         )}
+      </Link>
 
-        {/* Footer */}
+      {/* Preview toggle — outside the Link to avoid navigation */}
+      {(hasContextFields || context != null) && (
+        <button
+          className="nc-preview-toggle"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPreviewOpen((o) => !o);
+          }}
+          aria-expanded={previewOpen}
+          aria-controls={`preview-${signal.id}`}
+        >
+          <span className={`nc-preview-chevron${previewOpen ? ' nc-preview-chevron--open' : ''}`}>
+            ▾
+          </span>
+          {previewOpen ? 'Hide preview' : 'Preview'}
+        </button>
+      )}
+
+      {/* Expandable context preview */}
+      <div id={`preview-${signal.id}`}>
+        <SignalContextPreview context={context} expanded={previewOpen} />
+      </div>
+
+      {/* Footer */}
+      <Link href={href} className="nc-link">
         <div className="nc-foot">
           <span className="nc-src">
             <span className="indicator-dot indicator-dot--indigo" />
@@ -104,8 +142,8 @@ export function SignalCard({ signal }: SignalCardProps) {
 
         {/* Open signal affordance */}
         <span className="nc-open-hint">Open signal</span>
-      </div>
-    </Link>
+      </Link>
+    </div>
   );
 }
 
