@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useWatchlist, type WatchedEntity } from '@/hooks/useWatchlist';
 import { Badge } from '@/components/ui/Badge';
+import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 import type { Signal } from '@/data/mockSignals';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,6 +189,15 @@ function SignalRow({ signal }: { signal: Signal }) {
       {/* Top: badge row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Badge category={signal.category} />
+        <SignalImpactBadge
+          signal={{
+            significanceScore: signal.significanceScore,
+            confidenceScore: signal.confidence,
+            sourceSupportCount: signal.sourceSupportCount,
+            affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
+          }}
+          showLabel={false}
+        />
         {signal.confidence >= 85 && (
           <span style={{
             fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.06em',

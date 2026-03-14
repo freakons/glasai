@@ -3,6 +3,7 @@ import type { Signal } from '@/data/mockSignals';
 import type { FundingRound } from '@/lib/data/funding';
 import type { AIModel } from '@/lib/data/models';
 import type { ActiveEntity, EcosystemSnapshot } from '@/db/queries';
+import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-section renderers
@@ -14,6 +15,15 @@ function SignalRow({ signal }: { signal: Signal }) {
     <Link href={`/intelligence/signal/${signal.id}`} className="eco-row">
       <span className="eco-cat" data-cat={cat}>{cat}</span>
       <span className="eco-title">{signal.title}</span>
+      <SignalImpactBadge
+        signal={{
+          significanceScore: signal.significanceScore,
+          confidenceScore: signal.confidence,
+          sourceSupportCount: signal.sourceSupportCount,
+          affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
+        }}
+        showLabel={false}
+      />
       <span className="eco-meta">{signal.entityName}</span>
     </Link>
   );
