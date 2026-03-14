@@ -39,6 +39,10 @@ interface SignalRow {
   strategic_impact?: string | null;
   who_should_care?: string | null;
   prediction?: string | null;
+  // Intelligence status tracking (migration 015)
+  insight_generated?: boolean;
+  insight_generated_at?: string | null;
+  insight_generation_error?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,9 +170,9 @@ export async function getRecentSignals(limit = 20): Promise<Signal[]> {
 }
 
 /**
- * Update a signal's intelligence layer fields.
+ * Update a signal's intelligence layer fields and mark generation status.
  *
- * Uses a try/catch to gracefully handle cases where migration 014 has not
+ * Uses a try/catch to gracefully handle cases where migration 014/015 has not
  * yet been applied (the columns don't exist). Returns true on success.
  */
 export async function updateSignalInsight(
@@ -179,11 +183,14 @@ export async function updateSignalInsight(
     await dbQuery`
       UPDATE signals
       SET
-        why_this_matters = ${insight.why_this_matters},
-        strategic_impact = ${insight.strategic_impact},
-        who_should_care  = ${insight.who_should_care},
-        prediction       = ${insight.prediction},
-        updated_at       = NOW()
+        why_this_matters         = ${insight.why_this_matters},
+        strategic_impact         = ${insight.strategic_impact},
+        who_should_care          = ${insight.who_should_care},
+        prediction               = ${insight.prediction},
+        insight_generated        = TRUE,
+        insight_generated_at     = NOW(),
+        insight_generation_error = NULL,
+        updated_at               = NOW()
       WHERE id = ${signalId}
     `;
     return true;
@@ -194,4 +201,139 @@ export async function updateSignalInsight(
     );
     return false;
   }
+}
+
+/**
+ * Record a generation failure for a signal without overwriting existing insight.
+ * Stores a short sanitized error message (no raw stack traces).
+ */
+export async function markInsightGenerationError(
+  signalId: string,
+  error: string,
+): Promise<void> {
+  const sanitized = error.slice(0, 500).replace(/\n/g, ' ');
+  try {
+    await dbQuery`
+      UPDATE signals
+      SET
+        insight_generation_error = ${sanitized},
+        updated_at               = NOW()
+      WHERE id = ${signalId}
+        AND insight_generated IS NOT TRUE
+    `;
+  } catch {
+    // Non-critical — failure tracking must not block the pipeline
+  }
+}
+
+/**
+ * Find a recent signal with existing intelligence that matches the given
+ * title, entity, and category closely enough to reuse.
+ *
+ * Dedup/reuse rules (deterministic, no embeddings):
+ *   1. Same normalized first entity (if provided)
+ *   2. Same signal type / category (if provided)
+ *   3. Very similar normalized title (Levenshtein-like: shared prefix ≥60% of shorter title)
+ *   4. Created within the last 7 days
+ *   5. Has non-null why_this_matters (i.e. insight was generated)
+ *
+ * Returns the reusable SignalInsight or null if no match found.
+ */
+export async function findReusableInsight(input: {
+  title: string;
+  entities: string[];
+  signalType?: string;
+}): Promise<SignalInsight | null> {
+  try {
+    // Query recent signals that have generated intelligence
+    const rows = await dbQuery<{
+      title: string;
+      why_this_matters: string | null;
+      strategic_impact: string | null;
+      who_should_care: string | null;
+      prediction: string | null;
+      signal_type: string | null;
+      affected_entities: string[] | null;
+    }>`
+      SELECT title, why_this_matters, strategic_impact, who_should_care,
+             prediction, signal_type, affected_entities
+      FROM signals
+      WHERE insight_generated = TRUE
+        AND why_this_matters IS NOT NULL
+        AND created_at > NOW() - INTERVAL '7 days'
+      ORDER BY created_at DESC
+      LIMIT 100
+    `;
+
+    const normalizedInput = normalizeForDedup(input.title);
+    const inputEntity = input.entities.length > 0
+      ? normalizeForDedup(input.entities[0])
+      : null;
+
+    for (const row of rows) {
+      // Check entity match (if input has entities)
+      if (inputEntity) {
+        const rowEntities = row.affected_entities ?? [];
+        const hasEntityMatch = rowEntities.some(
+          e => normalizeForDedup(e) === inputEntity,
+        );
+        if (!hasEntityMatch) continue;
+      }
+
+      // Check signal type match (if provided)
+      if (input.signalType && row.signal_type && row.signal_type !== input.signalType) {
+        continue;
+      }
+
+      // Check title similarity
+      const normalizedRow = normalizeForDedup(row.title);
+      if (!isSimilarTitle(normalizedInput, normalizedRow)) continue;
+
+      // Match found — return reusable insight
+      return {
+        why_this_matters: row.why_this_matters,
+        strategic_impact: row.strategic_impact,
+        who_should_care: row.who_should_care,
+        prediction: row.prediction,
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.error(
+      '[signalStore] findReusableInsight failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+}
+
+/**
+ * Normalize a string for dedup comparison: lowercase, strip punctuation, collapse whitespace.
+ */
+function normalizeForDedup(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Check if two normalized titles are similar enough for intelligence reuse.
+ * Uses a shared-prefix heuristic: if the common prefix is ≥60% of the
+ * shorter string, or the strings are identical, consider them a match.
+ */
+function isSimilarTitle(a: string, b: string): boolean {
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  if (shorter.length === 0) return false;
+
+  // Check if shorter is a substring of longer
+  if (longer.includes(shorter)) return true;
+
+  // Shared prefix check
+  let shared = 0;
+  for (let i = 0; i < shorter.length; i++) {
+    if (shorter[i] === longer[i]) shared++;
+    else break;
+  }
+  return shared / shorter.length >= 0.6;
 }
