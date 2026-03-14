@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
 import { SignalContextPreview } from '@/components/signals/SignalContextPreview';
+import { EntityQuickProfile } from '@/components/entity/EntityQuickProfile';
 import type { SignalWithRankMeta } from '@/lib/signals/feedComposer';
 import type { SignalExplanation } from '@/lib/signals/explanationLayer';
 
@@ -131,16 +132,24 @@ export function SignalCard({ signal }: SignalCardProps) {
       </div>
 
       {/* Footer */}
-      <Link href={href} className="nc-link">
-        <div className="nc-foot">
-          <span className="nc-src">
-            <span className="indicator-dot indicator-dot--indigo" />
-            {signal.entityName || 'Intelligence'}
-          </span>
+      <div className="nc-foot">
+        <span className="nc-src">
+          <span className="indicator-dot indicator-dot--indigo" />
+          {signal.entityName ? (
+            <EntityQuickProfile entityName={signal.entityName}>
+              {signal.entityName}
+            </EntityQuickProfile>
+          ) : (
+            'Intelligence'
+          )}
+        </span>
+        <Link href={href} className="nc-link">
           <span className="nc-date">{formatSignalDate(signal.date)}</span>
-        </div>
+        </Link>
+      </div>
 
-        {/* Open signal affordance */}
+      {/* Open signal affordance */}
+      <Link href={href} className="nc-link">
         <span className="nc-open-hint">Open signal</span>
       </Link>
     </div>
