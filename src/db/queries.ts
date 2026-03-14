@@ -1118,6 +1118,81 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Entity Comparison
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Per-entity comparison data returned by getEntityComparison. */
+export interface EntityComparisonEntry {
+  name: string;
+  slug: string;
+  sector: string | null;
+  country: string | null;
+  signals24h: number;
+  signals7d: number;
+  signals30d: number;
+  signalsTotal: number;
+  eventsTotal: number;
+  avgConfidence: number;
+  lastActivity: string | null;
+  recentSignals: Signal[];
+  recentEvents: AiEvent[];
+}
+
+/**
+ * Fetch comparison data for 2–4 entities in parallel.
+ *
+ * Resolves each entity by slug, then fetches metrics, recent signals,
+ * and recent events concurrently.  Unknown slugs are silently skipped.
+ *
+ * @param entitySlugs  Array of entity URL slugs (2–4 items).
+ */
+export async function getEntityComparison(
+  entitySlugs: string[],
+): Promise<EntityComparisonEntry[]> {
+  const { slugify } = await import('@/utils/sanitize');
+  const safeSlugs = entitySlugs.slice(0, 4);
+
+  // Resolve all entities by slug
+  const entities = await Promise.all(
+    safeSlugs.map((slug) => getEntityBySlug(slug).catch(() => null)),
+  );
+
+  // Build comparison entries for found entities
+  const results = await Promise.all(
+    entities.map(async (entity): Promise<EntityComparisonEntry | null> => {
+      if (!entity) return null;
+
+      const [metrics, signals, events] = await Promise.all([
+        getEntityMetrics(entity.name).catch(() => ({
+          signalsTotal: 0, signals24h: 0, signals7d: 0, signals30d: 0,
+          eventsTotal: 0, avgConfidence: 0, firstSeen: null, lastActivity: null,
+        })),
+        getSignalsForEntity(entity.name, 3).catch(() => [] as Signal[]),
+        getEventsForEntity(entity.name, 3).catch(() => [] as AiEvent[]),
+      ]);
+
+      return {
+        name: entity.name,
+        slug: slugify(entity.name),
+        sector: entity.sector ?? null,
+        country: entity.country ?? null,
+        signals24h: metrics.signals24h,
+        signals7d: metrics.signals7d,
+        signals30d: metrics.signals30d,
+        signalsTotal: metrics.signalsTotal,
+        eventsTotal: metrics.eventsTotal,
+        avgConfidence: metrics.avgConfidence,
+        lastActivity: metrics.lastActivity,
+        recentSignals: signals,
+        recentEvents: events,
+      };
+    }),
+  );
+
+  return results.filter((r): r is EntityComparisonEntry => r !== null);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Articles
 // ─────────────────────────────────────────────────────────────────────────────
 

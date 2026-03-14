@@ -22,6 +22,7 @@ export const siteConfig = {
       { label: 'Funding', href: '/funding', id: 'funding', icon: 'trending-up', chip: null },
       { label: 'Ecosystem Graph', href: '/graph', id: 'graph', icon: 'share-2', chip: null },
       { label: 'Watchlist', href: '/watchlist', id: 'watchlist', icon: 'star', chip: null },
+      { label: 'Compare', href: '/compare', id: 'compare', icon: 'columns', chip: null },
     ],
     info: [
       { label: 'About', href: '/about', id: 'about', icon: 'info' },
