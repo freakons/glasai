@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { getSignalById, getRelatedSignals } from '@/db/queries';
+import { getSignalById, getRelatedSignals, getSupportingEventsForSignal } from '@/db/queries';
 import { Badge } from '@/components/ui/Badge';
+import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,7 +56,10 @@ export default async function SignalDetailPage(
   if (!signal) notFound();
 
   const tier = getSignificanceTier(signal.significanceScore);
-  const relatedSignals = await getRelatedSignals(signal.id, signal.entityName, 5).catch(() => []);
+  const [relatedSignals, supportingEvents] = await Promise.all([
+    getRelatedSignals(signal.id, signal.entityName, 5).catch(() => []),
+    getSupportingEventsForSignal(signal.id, signal.entityName, 10).catch(() => []),
+  ]);
 
   return (
     <div className="page-enter">
@@ -213,15 +217,21 @@ export default async function SignalDetailPage(
             </div>
           )}
 
-          {/* Supporting events placeholder */}
-          {!signal.context && (
-            <div style={GLASS_CARD}>
-              <div style={SECTION_HEADER}>Supporting Events</div>
+          {/* Supporting events */}
+          <div style={GLASS_CARD}>
+            <div style={SECTION_HEADER}>Supporting Events</div>
+            {supportingEvents.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {supportingEvents.map((evt) => (
+                  <SupportingEventRow key={evt.id} event={evt} />
+                ))}
+              </div>
+            ) : (
               <p style={{ fontSize: 13, color: 'var(--text3)', lineHeight: 1.7 }}>
-                No supporting events available yet
+                No supporting events available yet for this signal.
               </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Sidebar */}
