@@ -3,9 +3,12 @@ import { Sidebar } from './Sidebar';
 import { MainPanel } from './MainPanel';
 import { ContextPanel } from './ContextPanel';
 import { CommandBar } from './CommandBar';
+import type { Signal } from '@/data/mockSignals';
 
 interface AppLayoutProps {
   children: ReactNode;
+  /** Live signals for the context panel — pass from server data. */
+  signals?: Signal[];
 }
 
 /**
@@ -23,12 +26,12 @@ interface AppLayoutProps {
  *   < 1100px — context panel hidden
  *   < 768px  — sidebar hidden, single column
  */
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, signals }: AppLayoutProps) {
   return (
     <div className="il-grid">
       <Sidebar />
       <MainPanel>{children}</MainPanel>
-      <ContextPanel />
+      <ContextPanel signals={signals} />
       <CommandBar />
     </div>
   );

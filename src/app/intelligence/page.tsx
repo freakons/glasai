@@ -1,11 +1,9 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
 import { getSignals, getSiteStats } from '@/db/queries';
 import { formatFundingTotal } from '@/lib/parseFundingAmount';
-import { NewsCard } from '@/components/cards/NewsCard';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
-import { SignalCard } from '@/components/cards/SignalCard';
 import { StatCard } from '@/components/ui/StatCard';
-import { IntelligenceFilters } from './filters';
+import { IntelligenceFeed } from './IntelligenceFeed';
 import { CommandBar } from '@/ui/layout/CommandBar';
 import { composeFeed } from '@/lib/signals/feedComposer';
 
@@ -69,35 +67,7 @@ export default async function IntelligencePage() {
 
       {featured && <FeaturedCard article={featured} />}
 
-      <IntelligenceFilters />
-
-      {/* Signal-based intelligence feed (ranked, deduplicated, diversity-enforced) */}
-      {composedSignals.length > 0 && (
-        <div className="news-grid">
-          {composedSignals.map((signal) => (
-            <SignalCard key={signal.id} signal={signal} />
-          ))}
-        </div>
-      )}
-
-      {/* Article-based news grid (fallback when no signals available) */}
-      {composedSignals.length === 0 && articles.length > 0 && (
-        <div className="news-grid">
-          {articles.filter(a => !a.featured).map((article) => (
-            <NewsCard key={article.id} article={article} />
-          ))}
-        </div>
-      )}
-
-      {/* Empty state when no data exists yet */}
-      {composedSignals.length === 0 && articles.length === 0 && (
-        <div className="feed-empty">
-          <p className="feed-empty-title">No intelligence data yet</p>
-          <p className="feed-empty-sub">
-            The intelligence feed will populate automatically as the pipeline ingests data.
-          </p>
-        </div>
-      )}
+      <IntelligenceFeed signals={composedSignals} articles={articles} />
 
       <CommandBar />
     </>

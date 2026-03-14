@@ -646,6 +646,58 @@ body {
   font-family: var(--fm); font-size: 10px; font-weight: 500; color: var(--emerald-l); opacity: 0.8;
 }
 
+/* Signal card link wrapper */
+.nc-link {
+  display: block; text-decoration: none; color: inherit;
+  border-radius: var(--r);
+  outline-offset: 2px;
+}
+.nc-link:focus-visible {
+  outline: 2px solid var(--indigo-l);
+}
+
+/* "Open signal" hover hint */
+.nc-open-hint {
+  display: block;
+  font-family: var(--fm); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--indigo-l); opacity: 0;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+  transition: opacity 0.2s ease;
+  text-align: right;
+}
+.nc-link:hover .nc-open-hint,
+.nc-link:focus-visible .nc-open-hint { opacity: 0.7; }
+
+/* Featured card link wrapper */
+.featured-link {
+  display: block; text-decoration: none; color: inherit;
+  border-radius: 16px;
+}
+.featured-link:focus-visible {
+  outline: 2px solid var(--indigo-l); outline-offset: 2px;
+}
+.featured-open-hint {
+  display: block;
+  font-family: var(--fm); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--indigo-l); opacity: 0;
+  margin-top: 14px; padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  transition: opacity 0.2s ease;
+  text-align: right;
+}
+.featured-link:hover .featured-open-hint,
+.featured-link:focus-visible .featured-open-hint { opacity: 0.7; }
+
+/* Filter pill count badge */
+.fp-count {
+  margin-left: 5px;
+  font-family: var(--fm); font-size: 9px;
+  opacity: 0.6;
+}
+
 /* Featured card */
 .featured {
   border-radius: var(--r); padding: 28px; margin-bottom: 24px;
