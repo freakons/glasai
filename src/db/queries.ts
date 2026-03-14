@@ -1230,6 +1230,79 @@ function isArticleCat(v: string): v is ArticleCat {
   return ARTICLE_CATS.includes(v as ArticleCat);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Source Provenance
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lightweight article provenance record for display in signal detail pages. */
+export interface SourceArticle {
+  title: string;
+  sourceName: string;
+  url: string;
+  publishedAt: string;
+}
+
+/**
+ * Fetch the source articles that contributed evidence to a signal.
+ *
+ * Follows the chain: signal → supporting events → articles,
+ * collecting the distinct articles referenced by the signal's events.
+ *
+ * @param signalId    The signal to look up provenance for.
+ * @param entityName  Fallback entity name for broader event matching.
+ * @param limit       Maximum articles to return (default 10).
+ */
+export async function getSourceArticlesForSignal(
+  signalId: string,
+  entityName: string,
+  limit = 10,
+): Promise<SourceArticle[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const rows = await dbQuery<ArticleRow>`
+      WITH signal_events AS (
+        -- Events directly linked via supporting_events array
+        SELECT e.source_article_id
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+          AND e.source_article_id IS NOT NULL
+        UNION
+        -- Events that back-reference this signal
+        SELECT e.source_article_id
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+          AND e.source_article_id IS NOT NULL
+        UNION
+        -- Fallback: entity-based events within 90 days
+        SELECT e.source_article_id
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.source_article_id IS NOT NULL
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      )
+      SELECT DISTINCT a.id, a.title, a.source, a.url, a.published_at, a.category, a.created_at
+      FROM articles a
+      INNER JOIN signal_events se ON a.id = se.source_article_id
+      ORDER BY a.published_at DESC
+      LIMIT ${safeLimit}
+    `;
+
+    return rows.map((row) => ({
+      title: row.title,
+      sourceName: row.source,
+      url: row.url,
+      publishedAt: new Date(row.published_at).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetch articles from the database.
  *

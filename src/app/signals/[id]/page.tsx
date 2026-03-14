@@ -1,11 +1,12 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { getSignalById, getRelatedSignals, getSupportingEventsForSignal } from '@/db/queries';
+import { getSignalById, getRelatedSignals, getSupportingEventsForSignal, getSourceArticlesForSignal } from '@/db/queries';
 import { Badge } from '@/components/ui/Badge';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { EvidencePanel } from '@/components/signals/EvidencePanel';
 import { ConfidenceBreakdown } from '@/components/signals/ConfidenceBreakdown';
+import { SourceArticlesPanel } from '@/components/signals/SourceArticlesPanel';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
 import { slugify } from '@/utils/sanitize';
 
@@ -59,9 +60,10 @@ export default async function SignalDetailPage(
   if (!signal) notFound();
 
   const tier = getSignificanceTier(signal.significanceScore);
-  const [relatedSignals, supportingEvents] = await Promise.all([
+  const [relatedSignals, supportingEvents, sourceArticles] = await Promise.all([
     getRelatedSignals(signal.id, signal.entityName, 5).catch(() => []),
     getSupportingEventsForSignal(signal.id, signal.entityName, 10).catch(() => []),
+    getSourceArticlesForSignal(signal.id, signal.entityName, 10).catch(() => []),
   ]);
 
   return (
@@ -205,6 +207,9 @@ export default async function SignalDetailPage(
 
           {/* Confidence Breakdown — score explanation with factors */}
           <ConfidenceBreakdown signal={signal} />
+
+          {/* Source Articles — article-level provenance */}
+          <SourceArticlesPanel articles={sourceArticles} />
         </div>
 
         {/* Sidebar */}
