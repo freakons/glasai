@@ -233,15 +233,24 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 5. Pipeline lock ──────────────────────────────────────────────────────
-  let lockStatus: { locked: boolean; lockedBy?: string; lockedAt?: string; strategy?: string } = { locked: false };
+  let lockStatus: {
+    locked: boolean; lockedBy?: string; lockedAt?: string;
+    strategy?: string; lockAgeSeconds?: number; isStale?: boolean;
+  } = { locked: false };
+  let intelligenceLockStatus: typeof lockStatus = { locked: false };
   try {
-    lockStatus = await getPipelineLockStatus();
+    lockStatus = await getPipelineLockStatus('pipeline/run');
+    intelligenceLockStatus = await getPipelineLockStatus('intelligence/run');
   } catch {
     // Non-critical
   }
 
   if (lockStatus.locked) {
-    warnings.push(`Pipeline lock is held by: ${lockStatus.lockedBy ?? 'unknown'}`);
+    const staleNote = lockStatus.isStale ? ' (STALE — may need force-unlock via POST /api/pipeline/status?action=force_unlock)' : '';
+    warnings.push(`Pipeline lock is held by: ${lockStatus.lockedBy ?? 'unknown'} (age=${lockStatus.lockAgeSeconds ?? '?'}s)${staleNote}`);
+  }
+  if (intelligenceLockStatus.locked) {
+    warnings.push(`Intelligence lock is held by: ${intelligenceLockStatus.lockedBy ?? 'unknown'} (age=${intelligenceLockStatus.lockAgeSeconds ?? '?'}s)`);
   }
 
   // ── 6. Pipeline runs — last run, last ingest, last signals ────────────────
@@ -492,7 +501,9 @@ export async function GET(req: NextRequest) {
 
     pipeline: {
       canonical:           'POST /api/pipeline/run',
+      statusEndpoint:      'GET /api/pipeline/status',
       lock:                lockStatus,
+      intelligenceLock:    intelligenceLockStatus,
       lastRun,
       lastSuccessfulRun,
       lastIngestRun,
