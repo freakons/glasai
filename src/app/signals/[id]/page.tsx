@@ -4,6 +4,8 @@ import type { Metadata } from 'next';
 import { getSignalById, getRelatedSignals, getSupportingEventsForSignal } from '@/db/queries';
 import { Badge } from '@/components/ui/Badge';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
+import { EvidencePanel } from '@/components/signals/EvidencePanel';
+import { ConfidenceBreakdown } from '@/components/signals/ConfidenceBreakdown';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
 import { slugify } from '@/utils/sanitize';
 
@@ -198,41 +200,11 @@ export default async function SignalDetailPage(
             </div>
           )}
 
-          {/* Confidence explanation */}
-          {signal.context?.confidenceExplanation && (
-            <div style={GLASS_CARD}>
-              <div style={SECTION_HEADER}>Confidence Assessment</div>
-              <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.7 }}>
-                {signal.context.confidenceExplanation}
-              </p>
-            </div>
-          )}
+          {/* Evidence Panel — structured evidence chain */}
+          <EvidencePanel signal={signal} supportingEvents={supportingEvents} />
 
-          {/* Source basis */}
-          {signal.context?.sourceBasis && (
-            <div style={GLASS_CARD}>
-              <div style={SECTION_HEADER}>Source Basis</div>
-              <p style={{ fontSize: 13, color: 'var(--text3)', lineHeight: 1.7 }}>
-                {signal.context.sourceBasis}
-              </p>
-            </div>
-          )}
-
-          {/* Supporting events */}
-          <div style={GLASS_CARD}>
-            <div style={SECTION_HEADER}>Supporting Events</div>
-            {supportingEvents.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {supportingEvents.map((evt) => (
-                  <SupportingEventRow key={evt.id} event={evt} />
-                ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: 13, color: 'var(--text3)', lineHeight: 1.7 }}>
-                No supporting events available yet for this signal.
-              </p>
-            )}
-          </div>
+          {/* Confidence Breakdown — score explanation with factors */}
+          <ConfidenceBreakdown signal={signal} />
         </div>
 
         {/* Sidebar */}
