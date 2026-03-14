@@ -15,6 +15,7 @@ import {
   deriveCorroborationLabel,
   deriveConfidenceLabel,
 } from '@/lib/signals/explanationLayer';
+import { slugify } from '@/utils/sanitize';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Row types
@@ -79,8 +80,8 @@ export async function GET(
   const { name } = await params;
   const entityName = decodeURIComponent(name);
 
-  // 1. Fetch the entity record
-  const [entity] = await dbQuery<EntityRow>`
+  // 1. Fetch the entity record — exact name first, then slug fallback
+  let [entity] = await dbQuery<EntityRow>`
     SELECT
       id, name, type, description, sector, country,
       founded, website, risk_level, tags, financial_scale, created_at
@@ -88,6 +89,18 @@ export async function GET(
     WHERE name = ${entityName}
     LIMIT 1
   `;
+
+  if (!entity) {
+    const slug = slugify(entityName);
+    [entity] = await dbQuery<EntityRow>`
+      SELECT
+        id, name, type, description, sector, country,
+        founded, website, risk_level, tags, financial_scale, created_at
+      FROM entities
+      WHERE trim(both '-' from lower(regexp_replace(name, '[^a-zA-Z0-9]+', '-', 'g'))) = ${slug}
+      LIMIT 1
+    `;
+  }
 
   if (!entity) {
     return NextResponse.json({ ok: false, error: 'Entity not found' }, { status: 404 });
