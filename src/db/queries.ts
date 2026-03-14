@@ -929,6 +929,70 @@ export async function getEventsForEntity(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity Timeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TimelineItem {
+  type: 'signal' | 'event';
+  id: string;
+  title: string;
+  category: string;
+  timestamp: string;
+  confidence?: number;
+  amount?: string;
+  href: string;
+}
+
+/**
+ * Fetch a merged, chronologically-sorted timeline of signals and events
+ * for a single entity.
+ *
+ * @param entityName  The entity name to match.
+ * @param limit       Maximum items to return (default 25, max 50).
+ */
+export async function getEntityTimeline(
+  entityName: string,
+  limit = 25,
+): Promise<TimelineItem[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  const [signals, events] = await Promise.all([
+    getSignalsForEntity(entityName, safeLimit).catch(() => []),
+    getEventsForEntity(entityName, safeLimit).catch(() => []),
+  ]);
+
+  const items: TimelineItem[] = [];
+
+  for (const sig of signals) {
+    items.push({
+      type: 'signal',
+      id: sig.id,
+      title: sig.title,
+      category: sig.category,
+      timestamp: sig.date,
+      confidence: sig.confidence,
+      href: `/signals/${sig.id}`,
+    });
+  }
+
+  for (const evt of events) {
+    items.push({
+      type: 'event',
+      id: evt.id,
+      title: evt.title,
+      category: evt.type,
+      timestamp: evt.date,
+      amount: evt.amount,
+      href: `/events/${evt.id}`,
+    });
+  }
+
+  items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return items.slice(0, safeLimit);
+}
+
 /**
  * Aggregated metrics for an entity dossier.
  */
