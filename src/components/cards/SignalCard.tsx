@@ -22,10 +22,8 @@ export function SignalCard({ signal }: SignalCardProps) {
   const sourceCount = signal._sourceCount ?? signal.sourceSupportCount;
   const explanation = signal.explanation;
 
-  // Route to entity page if available, otherwise to signals browser
-  const href = signal.entityId
-    ? `/entity/${encodeURIComponent(signal.entityName || signal.entityId)}`
-    : '/signals';
+  // Route to signal detail page
+  const href = `/signals/${encodeURIComponent(signal.id)}`;
 
   return (
     <Link href={href} className="nc-link">

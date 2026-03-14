@@ -434,6 +434,94 @@ export async function getSignals(
 }
 
 /**
+ * Fetch a single signal by ID, including its context if available.
+ *
+ * Returns null when the signal doesn't exist or the DB is unavailable.
+ */
+export async function getSignalById(id: string): Promise<Signal | null> {
+  const hasContextTable = await tableExists('signal_contexts');
+
+  if (hasContextTable) {
+    const rows = await dbQuery<SignalRow>`
+      SELECT
+        s.id,
+        s.title,
+        s.summary,
+        s.description,
+        s.category,
+        s.signal_type,
+        s.entity_id,
+        s.entity_name,
+        s.confidence,
+        s.confidence_score,
+        s.date,
+        s.created_at,
+        s.significance_score,
+        s.source_support_count,
+        sc.id                     AS ctx_id,
+        sc.summary                AS ctx_summary,
+        sc.why_it_matters         AS ctx_why_it_matters,
+        sc.affected_entities      AS ctx_affected_entities,
+        sc.implications           AS ctx_implications,
+        sc.confidence_explanation AS ctx_confidence_explanation,
+        sc.source_basis           AS ctx_source_basis,
+        sc.model_provider         AS ctx_model_provider,
+        sc.model_name             AS ctx_model_name,
+        sc.prompt_version         AS ctx_prompt_version,
+        sc.status                 AS ctx_status,
+        sc.generation_error       AS ctx_generation_error,
+        sc.created_at             AS ctx_created_at,
+        sc.updated_at             AS ctx_updated_at
+      FROM signals s
+      LEFT JOIN signal_contexts sc
+        ON sc.signal_id = s.id AND sc.status = 'ready'
+      WHERE s.id = ${id}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rowToSignal(rows[0]) : null;
+  }
+
+  const rows = await dbQuery<SignalRow>`
+    SELECT
+      id, title, summary, description, category, signal_type,
+      entity_id, entity_name, confidence, confidence_score,
+      date, created_at, significance_score, source_support_count
+    FROM signals
+    WHERE id = ${id}
+    LIMIT 1
+  `;
+  return rows.length > 0 ? rowToSignal(rows[0]) : null;
+}
+
+/**
+ * Fetch signals related to a given signal by shared entity.
+ *
+ * Returns up to `limit` signals for the same entity, excluding the
+ * signal itself.
+ */
+export async function getRelatedSignals(
+  signalId: string,
+  entityName: string,
+  limit = 5,
+): Promise<Signal[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 20);
+
+  const rows = await dbQuery<SignalRow>`
+    SELECT
+      id, title, summary, description, category, signal_type,
+      entity_id, entity_name, confidence, confidence_score,
+      date, created_at, significance_score, source_support_count
+    FROM signals
+    WHERE entity_name = ${entityName}
+      AND id != ${signalId}
+      AND (status IS NULL OR status NOT IN ('rejected'))
+    ORDER BY significance_score DESC NULLS LAST, created_at DESC
+    LIMIT ${safeLimit}
+  `;
+  return rows.map(rowToSignal);
+}
+
+/**
  * Fetch AI ecosystem events from the database.
  *
  * Reads from the `events` table populated by the ingestion pipeline.
