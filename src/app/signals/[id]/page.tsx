@@ -108,12 +108,6 @@ export default async function SignalDetailPage(
           {tier === 'high' && (
             <span className="sig-badge sig-high">Notable</span>
           )}
-          {signal.confidence >= 90 && (
-            <span className="verified">
-              <span className="indicator-dot indicator-dot--emerald" />
-              Verified
-            </span>
-          )}
           <SignalImpactBadge signal={{
             significanceScore: signal.significanceScore,
             confidenceScore: signal.confidence,
@@ -121,6 +115,12 @@ export default async function SignalDetailPage(
             affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
           }} />
           <SignalMomentumBadge momentum={momentum} />
+          {signal.confidence >= 90 && (
+            <span className="verified" title="Confidence: Verified — Score of 90 or above indicates high-confidence intelligence.">
+              <span className="indicator-dot indicator-dot--emerald" />
+              Verified
+            </span>
+          )}
         </div>
 
         {/* Title */}

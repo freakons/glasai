@@ -206,8 +206,10 @@ function SignalRow({ signal }: { signal: Signal }) {
           <span style={{
             fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.06em',
             color: 'var(--text3)',
-          }}>
-            {signal.confidence}% confidence
+          }}
+          title={`Confidence: ${signal.confidence}% — Overall trust level for this signal.`}
+          >
+            {signal.confidence}%
           </span>
         )}
       </div>

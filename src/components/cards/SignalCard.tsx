@@ -82,7 +82,7 @@ export function SignalCard({ signal }: SignalCardProps) {
               </span>
             )}
             {signal.confidence >= 90 && (
-              <span className="verified">
+              <span className="verified" title="Confidence: Verified — Score of 90 or above indicates high-confidence intelligence.">
                 <span className="indicator-dot indicator-dot--emerald" />
                 {explanation?.confidenceLabel ?? 'Verified'}
               </span>

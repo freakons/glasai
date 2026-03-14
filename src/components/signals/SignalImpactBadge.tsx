@@ -62,8 +62,12 @@ export function SignalImpactBadge({
   showLabel = true,
   style,
 }: SignalImpactBadgeProps) {
-  const { level } = computeImpact(signal);
+  const { level, usedFallback } = computeImpact(signal);
   const levelStyle = LEVEL_STYLES[level];
+
+  const titleText = usedFallback
+    ? `Impact: ${level} (estimated) — Significance score not yet available; using heuristic estimate.`
+    : `Impact: ${level} — Derived from significance score${signal.sourceSupportCount ? ', source support' : ''}${signal.affectedEntitiesCount ? ', and entity reach' : ''}.`;
 
   return (
     <span
@@ -71,9 +75,10 @@ export function SignalImpactBadge({
         ...BADGE_BASE,
         color: levelStyle.color,
         border: `1px solid ${levelStyle.borderColor}`,
+        opacity: usedFallback ? 0.65 : 1,
         ...style,
       }}
-      title={`Signal impact: ${level}`}
+      title={titleText}
     >
       {showLabel ? `Impact: ${level}` : level}
     </span>

@@ -34,7 +34,7 @@ export interface MomentumInput {
  *
  * Rules:
  *   - new:     previousCount = 0 AND recentCount > 0
- *   - rising:  recentCount > previousCount × 1.5 (at least 50% increase)
+ *   - rising:  recentCount >= 2 AND recentCount > previousCount × 1.5 (>50% increase, min 2 events)
  *   - cooling: recentCount < previousCount × 0.6 (at least 40% decrease)
  *   - stable:  everything else (counts are close or both zero)
  *
@@ -52,8 +52,8 @@ export function computeMomentum(input: MomentumInput): MomentumResult {
   } else if (previousCount === 0 && recentCount > 0) {
     // Activity appeared with no prior baseline
     level = 'new';
-  } else if (recentCount > previousCount * 1.5) {
-    // Meaningful increase (>50% more activity)
+  } else if (recentCount >= 2 && recentCount > previousCount * 1.5) {
+    // Meaningful increase (>50% more activity, minimum 2 events to avoid noise)
     level = 'rising';
   } else if (recentCount < previousCount * 0.6) {
     // Meaningful decrease (>40% drop)

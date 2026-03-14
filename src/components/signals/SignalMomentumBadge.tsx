@@ -81,8 +81,8 @@ export function SignalMomentumBadge({
   const config = LEVEL_CONFIG[level];
 
   const title = showCounts
-    ? `Momentum: ${config.label} — Recent: ${momentum.recentCount}, Previous: ${momentum.previousCount}`
-    : `Signal momentum: ${config.label}`;
+    ? `Momentum: ${config.label} — ${momentum.recentCount} events in last 7 days vs ${momentum.previousCount} in prior 7 days.`
+    : `Momentum: ${config.label} — Recent activity compared to the previous 7-day window.`;
 
   return (
     <span

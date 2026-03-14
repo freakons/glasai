@@ -34,9 +34,9 @@ export function computeCorroboration(opts: {
   const confidenceScore = opts.confidenceScore;
 
   let strengthLabel: StrengthLabel = 'Weak';
-  if (sourceCount >= 4 && eventCount >= 2 && confidenceScore >= 80) {
+  if (sourceCount >= 4 && eventCount >= 2 && independentSourceCount >= 2) {
     strengthLabel = 'Strong';
-  } else if (sourceCount >= 2 && eventCount >= 1 && confidenceScore >= 65) {
+  } else if (sourceCount >= 2 && eventCount >= 1) {
     strengthLabel = 'Moderate';
   }
 
@@ -114,6 +114,7 @@ export function CorroborationIndicator({ data }: CorroborationIndicatorProps) {
             textTransform: 'uppercase', padding: '3px 10px', borderRadius: 10,
             color: colors.color, border: `1px solid ${colors.border}`,
           }}
+          title={`Corroboration: ${data.strengthLabel} — ${data.sourceCount} sources, ${data.eventCount} supporting events, ${data.independentSourceCount} independent sources.`}
         >
           {data.strengthLabel}
         </span>

@@ -231,14 +231,6 @@ function SignalItem({ signal }: { signal: Signal }) {
           {signal.category.toUpperCase()}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            fontFamily: 'var(--fm)',
-            fontSize: '10.5px',
-            color: confColor,
-            letterSpacing: '0.05em',
-          }}>
-            {signal.confidence}% confidence
-          </span>
           <SignalImpactBadge
             signal={{
               significanceScore: signal.significanceScore,
@@ -251,6 +243,16 @@ function SignalItem({ signal }: { signal: Signal }) {
           {signal.momentum && (
             <SignalMomentumBadge momentum={signal.momentum} showLabel={false} />
           )}
+          <span style={{
+            fontFamily: 'var(--fm)',
+            fontSize: '10.5px',
+            color: confColor,
+            letterSpacing: '0.05em',
+          }}
+          title={`Confidence: ${signal.confidence}% — Overall trust level for this signal.`}
+          >
+            {signal.confidence}%
+          </span>
         </div>
       </div>
 
