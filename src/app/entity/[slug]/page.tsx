@@ -7,11 +7,13 @@ import {
   getEventsForEntity,
   getEntityMetrics,
   getEntityTimeline,
+  getEntityMomentum,
 } from '@/db/queries';
 import type { TimelineItem } from '@/db/queries';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { WatchlistButton } from '@/components/watchlist/WatchlistButton';
 import { EntityTimeline } from '@/components/entity/TimelineNavigator';
+import { EntityMomentumBadge } from '@/components/entity/EntityMomentumBadge';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -80,7 +82,7 @@ export default async function EntityDossierPage(
 
   const entityName = entity.name;
 
-  const [signals, events, metrics, timeline] = await Promise.all([
+  const [signals, events, metrics, timeline, momentum] = await Promise.all([
     getSignalsForEntity(entityName, 20).catch(() => []),
     getEventsForEntity(entityName, 15).catch(() => []),
     getEntityMetrics(entityName).catch(() => ({
@@ -88,6 +90,7 @@ export default async function EntityDossierPage(
       eventsTotal: 0, avgConfidence: 0, firstSeen: null, lastActivity: null,
     })),
     getEntityTimeline(entityName, 25).catch(() => [] as TimelineItem[]),
+    getEntityMomentum(entityName).catch(() => null),
   ]);
 
   const riskColor = entity.riskLevel === 'high'
@@ -151,6 +154,9 @@ export default async function EntityDossierPage(
           }}>
             {entity.name}
           </h1>
+          {momentum && (
+            <EntityMomentumBadge result={momentum.result} />
+          )}
           <WatchlistButton
             slug={slug}
             name={entity.name}
@@ -224,6 +230,12 @@ export default async function EntityDossierPage(
             <div className="stat-n">{metrics.avgConfidence > 0 ? metrics.avgConfidence.toFixed(0) : '—'}</div>
             <div className="stat-l">Avg Confidence</div>
           </div>
+          {momentum && (
+            <div className="stat" style={{ '--sc': momentum.result.momentumScore >= 70 ? 'rgba(217,119,6,0.35)' : momentum.result.momentumScore >= 45 ? 'rgba(16,185,129,0.35)' : 'rgba(100,116,139,0.35)', '--sv': momentum.result.momentumScore >= 70 ? 'var(--amber-l)' : momentum.result.momentumScore >= 45 ? 'var(--emerald-l)' : 'var(--text2)' } as React.CSSProperties}>
+              <div className="stat-n">{momentum.result.momentumScore}</div>
+              <div className="stat-l">Momentum</div>
+            </div>
+          )}
         </div>
       </div>
 
