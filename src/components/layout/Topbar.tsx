@@ -1,5 +1,7 @@
 'use client';
 
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+
 export function Topbar({ title, highlight }: { title: string; highlight: string }) {
   return (
     <div className="topbar">
@@ -25,6 +27,7 @@ export function Topbar({ title, highlight }: { title: string; highlight: string 
         <input className="search-in" placeholder="Search intelligence… (press /)" />
       </div>
       <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        <NotificationBell />
         <button className="tb-btn primary">Request Access</button>
       </div>
     </div>

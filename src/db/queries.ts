@@ -1971,3 +1971,88 @@ export async function getEcosystemActivitySnapshot(): Promise<EcosystemSnapshot>
     return EMPTY_SNAPSHOT;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alerts
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AlertRow {
+  id: string;
+  user_id: string | null;
+  type: string;
+  entity_name: string | null;
+  signal_id: string | null;
+  trend_id: string | null;
+  title: string;
+  message: string;
+  created_at: string;
+  read: boolean;
+}
+
+export interface AlertRecord {
+  id: string;
+  userId: string | null;
+  type: string;
+  entityName: string | null;
+  signalId: string | null;
+  trendId: string | null;
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+}
+
+function mapAlertRow(row: AlertRow): AlertRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    entityName: row.entity_name,
+    signalId: row.signal_id,
+    trendId: row.trend_id,
+    title: row.title,
+    message: row.message,
+    createdAt: row.created_at,
+    read: row.read,
+  };
+}
+
+/**
+ * Fetch the most recent alerts, ordered by creation time descending.
+ */
+export async function getAlerts(limit = 20): Promise<AlertRecord[]> {
+  if (!(await tableExists('alerts'))) return [];
+  const rows = await dbQuery<AlertRow>`
+    SELECT id, user_id, type, entity_name, signal_id, trend_id,
+           title, message, created_at, read
+    FROM alerts
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return rows.map(mapAlertRow);
+}
+
+/**
+ * Count unread alerts.
+ */
+export async function getUnreadAlertCount(): Promise<number> {
+  if (!(await tableExists('alerts'))) return 0;
+  const rows = await dbQuery<{ count: string }>`
+    SELECT COUNT(*) AS count FROM alerts WHERE read = false
+  `;
+  return parseInt(rows[0]?.count ?? '0', 10);
+}
+
+/**
+ * Mark a single alert as read.
+ */
+export async function markAlertRead(id: string): Promise<void> {
+  await dbQuery`UPDATE alerts SET read = true WHERE id = ${id}`;
+}
+
+/**
+ * Mark all alerts as read.
+ */
+export async function markAllAlertsRead(): Promise<void> {
+  await dbQuery`UPDATE alerts SET read = true WHERE read = false`;
+}
