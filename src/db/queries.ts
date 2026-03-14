@@ -512,7 +512,7 @@ export async function getRelatedSignals(
       entity_id, entity_name, confidence, confidence_score,
       date, created_at, significance_score, source_support_count
     FROM signals
-    WHERE entity_name = ${entityName}
+    WHERE LOWER(entity_name) = LOWER(${entityName})
       AND id != ${signalId}
       AND (status IS NULL OR status NOT IN ('rejected'))
     ORDER BY significance_score DESC NULLS LAST, created_at DESC
@@ -563,7 +563,7 @@ export async function getSupportingEventsForSignal(
         -- Fallback: events for the same entity within 90 days
         SELECT e.*
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.timestamp >= NOW() - INTERVAL '90 days'
       ),
@@ -649,7 +649,7 @@ export async function getSignalsForEvent(
         -- Fallback: signals for the same entity
         SELECT s.*
         FROM signals s
-        WHERE s.entity_name = ${entityName}
+        WHERE LOWER(s.entity_name) = LOWER(${entityName})
           AND s.entity_name != ''
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
       ),
@@ -817,7 +817,7 @@ export async function getSignalsForEntity(
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ${entityName}
+        WHERE LOWER(e.name) = LOWER(${entityName})
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
         ORDER BY s.created_at DESC
         LIMIT ${safeLimit}
@@ -825,7 +825,7 @@ export async function getSignalsForEntity(
       return rows.map(rowToSignal);
     }
 
-    // Fallback: match on denormalized entity_name column
+    // Fallback: match on denormalized entity_name column (case-insensitive)
     const rows = await dbQuery<SignalRow>`
       SELECT
         id, title, summary, description,
@@ -833,7 +833,7 @@ export async function getSignalsForEntity(
         confidence, confidence_score, date, created_at,
         significance_score, source_support_count
       FROM signals
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
         AND (status IS NULL OR status NOT IN ('rejected'))
       ORDER BY created_at DESC
       LIMIT ${safeLimit}
@@ -860,6 +860,9 @@ export async function getSignalsForEntities(
   try {
     const hasJunction = await tableExists('signal_entities');
 
+    // Use case-insensitive matching to handle casing variants (e.g. "OpenAI" vs "openai")
+    const lowerNames = entityNames.map((n) => n.toLowerCase());
+
     if (hasJunction) {
       const rows = await dbQuery<SignalRow>`
         SELECT DISTINCT ON (s.id)
@@ -870,7 +873,7 @@ export async function getSignalsForEntities(
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ANY(${entityNames})
+        WHERE LOWER(e.name) = ANY(${lowerNames})
           AND (s.status IS NULL OR s.status NOT IN ('rejected'))
         ORDER BY s.id, s.created_at DESC
       `;
@@ -879,7 +882,7 @@ export async function getSignalsForEntities(
       return rows.slice(0, safeLimit).map(rowToSignal);
     }
 
-    // Fallback: match on denormalized entity_name column
+    // Fallback: match on denormalized entity_name column (case-insensitive)
     const rows = await dbQuery<SignalRow>`
       SELECT
         id, title, summary, description,
@@ -887,7 +890,7 @@ export async function getSignalsForEntities(
         confidence, confidence_score, date, created_at,
         significance_score, source_support_count
       FROM signals
-      WHERE entity_name = ANY(${entityNames})
+      WHERE LOWER(entity_name) = ANY(${lowerNames})
         AND (status IS NULL OR status NOT IN ('rejected'))
       ORDER BY created_at DESC
       LIMIT ${safeLimit}
@@ -919,7 +922,7 @@ export async function getEventsForEntity(
         entity_id, entity_name, company,
         amount, signal_ids, timestamp, created_at
       FROM events
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
       ORDER BY timestamp DESC
       LIMIT ${safeLimit}
     `;
@@ -1047,13 +1050,13 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
         FROM signals s
         JOIN signal_entities se ON se.signal_id = s.id
         JOIN entities e ON e.id = se.entity_id
-        WHERE e.name = ${entityName}
+        WHERE LOWER(e.name) = LOWER(${entityName})
       `;
 
       const [evtRow] = await dbQuery<{ count: string }>`
         SELECT COUNT(*)::text AS count
         FROM events
-        WHERE entity_name = ${entityName}
+        WHERE LOWER(entity_name) = LOWER(${entityName})
       `;
 
       if (!row) return zero;
@@ -1070,7 +1073,7 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
       };
     }
 
-    // Fallback: denormalized entity_name
+    // Fallback: denormalized entity_name (case-insensitive)
     type MetricRow = {
       total: string;
       h24: string;
@@ -1091,13 +1094,13 @@ export async function getEntityMetrics(entityName: string): Promise<EntityDossie
         MIN(created_at)::text AS first_seen,
         MAX(created_at)::text AS last_activity
       FROM signals
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
     `;
 
     const [evtRow] = await dbQuery<{ count: string }>`
       SELECT COUNT(*)::text AS count
       FROM events
-      WHERE entity_name = ${entityName}
+      WHERE LOWER(entity_name) = LOWER(${entityName})
     `;
 
     if (!row) return zero;
@@ -1278,7 +1281,7 @@ export async function getSourceArticlesForSignal(
         -- Fallback: entity-based events within 90 days
         SELECT e.source_article_id
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.source_article_id IS NOT NULL
           AND e.timestamp >= NOW() - INTERVAL '90 days'
@@ -1335,7 +1338,7 @@ export async function getSignalMomentum(
         -- Strategy 3: Entity fallback (90-day window)
         SELECT e.timestamp
         FROM events e
-        WHERE e.entity_name = ${entityName}
+        WHERE LOWER(e.entity_name) = LOWER(${entityName})
           AND e.entity_name != ''
           AND e.timestamp >= NOW() - INTERVAL '90 days'
       )
@@ -2266,7 +2269,11 @@ export async function getUsersWatchingEntityName(entityName: string): Promise<st
 
 /**
  * Find all user IDs watching any of the given entity names.
- * Returns a map: entityName → [userId1, userId2, ...]
+ * Returns a map: lowercased entityName → [userId1, userId2, ...]
+ *
+ * IMPORTANT: Map keys are lowercased for case-insensitive lookup.
+ * Callers must use normalizeEntityForMatching() (or .toLowerCase())
+ * when looking up entries in the returned map.
  */
 export async function getUsersWatchingEntityNames(entityNames: string[]): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>();
@@ -2278,7 +2285,8 @@ export async function getUsersWatchingEntityNames(entityNames: string[]): Promis
     WHERE LOWER(entity_name) = ANY(${entityNames.map((n) => n.toLowerCase())})
   `;
   for (const row of rows) {
-    const key = row.entity_name;
+    // Key by lowercased name so callers can do case-insensitive lookups
+    const key = row.entity_name.toLowerCase();
     if (!result.has(key)) result.set(key, []);
     result.get(key)!.push(row.user_id);
   }

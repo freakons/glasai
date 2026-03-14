@@ -21,6 +21,7 @@
 
 import { dbQuery } from '@/db/client';
 import { getUsersWatchingEntityNames } from '@/db/queries';
+import { normalizeEntityForMatching } from '@/lib/entityResolver';
 import type { Signal } from '@/data/mockSignals';
 import type { SignalCluster } from '@/lib/signals/clusterSignals';
 
@@ -282,7 +283,8 @@ function generateWatchedHighImpactAlerts(
     if (score < HIGH_IMPACT_THRESHOLD) continue;
     if (!signal.entityName) continue;
 
-    const watchers = watcherMap.get(signal.entityName) ?? [];
+    // Case-insensitive lookup: watcherMap keys are lowercased
+    const watchers = watcherMap.get(normalizeEntityForMatching(signal.entityName)) ?? [];
     for (const userId of watchers) {
       alerts.push({
         id: alertId(),
@@ -318,7 +320,8 @@ function generateWatchedRisingAlerts(
     if (cluster.momentum !== 'rising') continue;
 
     for (const entityName of cluster.entities) {
-      const watchers = watcherMap.get(entityName) ?? [];
+      // Case-insensitive lookup: watcherMap keys are lowercased
+      const watchers = watcherMap.get(normalizeEntityForMatching(entityName)) ?? [];
       for (const userId of watchers) {
         const key = `${userId}:${cluster.id}`;
         if (seen.has(key)) continue;
@@ -357,7 +360,8 @@ function generateWatchedTrendAlerts(
 
   for (const cluster of clusters) {
     for (const entityName of cluster.entities) {
-      const watchers = watcherMap.get(entityName) ?? [];
+      // Case-insensitive lookup: watcherMap keys are lowercased
+      const watchers = watcherMap.get(normalizeEntityForMatching(entityName)) ?? [];
       for (const userId of watchers) {
         const key = `${userId}:${cluster.id}`;
         if (seen.has(key)) continue;

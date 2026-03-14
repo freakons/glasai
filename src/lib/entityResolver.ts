@@ -371,6 +371,52 @@ export function detectAndLinkEntities(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Entity matching identity
+//
+// Canonical rule for entity identity across the platform:
+//   - display identity  = entity_name as stored (preserves original casing)
+//   - routing identity  = slugify(entity_name)  (lowercase, alphanumeric, dashes)
+//   - matching identity = normalizeEntityForMatching(name) (lowercase, trimmed)
+//
+// All entity comparisons (watchlist ↔ signal, alert targeting, digest queries,
+// search results) MUST use normalizeEntityForMatching() or LOWER() in SQL to
+// avoid case-sensitivity mismatches.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes an entity name for matching/comparison purposes.
+ * This is the single source of truth for case-insensitive entity comparison.
+ *
+ * Use this in JS code when comparing entity names across systems
+ * (watchlist ↔ signals, alerts, digests, trends).
+ *
+ * The SQL equivalent is: LOWER(entity_name)
+ */
+export function normalizeEntityForMatching(name: string): string {
+  return name.toLowerCase().trim();
+}
+
+/**
+ * Case-insensitive entity name comparison.
+ * Returns true if both names refer to the same entity.
+ */
+export function entityNamesMatch(a: string, b: string): boolean {
+  return normalizeEntityForMatching(a) === normalizeEntityForMatching(b);
+}
+
+/**
+ * Build a case-insensitive lookup map from entity names to values.
+ * Keys are lowercased; use normalizeEntityForMatching() to look up.
+ */
+export function buildEntityMatchMap<T>(entries: [string, T][]): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const [name, value] of entries) {
+    map.set(normalizeEntityForMatching(name), value);
+  }
+  return map;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Reset for testing
 // ─────────────────────────────────────────────────────────────────────────────
 

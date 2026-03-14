@@ -41,11 +41,11 @@ export async function GET(
   const entityName = decodeURIComponent(name);
 
   try {
-    // 1. Find entity by exact name or slug
+    // 1. Find entity by case-insensitive name or slug
     let [entity] = await dbQuery<EntityRow>`
       SELECT name, sector, country
       FROM entities
-      WHERE name = ${entityName}
+      WHERE LOWER(name) = LOWER(${entityName})
       LIMIT 1
     `;
 
