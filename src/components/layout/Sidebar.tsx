@@ -67,6 +67,20 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="sb-foot">
+        <button
+          className="tour-restart-link"
+          onClick={() => {
+            const fn = (window as unknown as Record<string, unknown>).__omStartTour;
+            if (typeof fn === 'function') fn();
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+          </svg>
+          Help &middot; Start tour
+        </button>
         <div className="sb-brand">
           <span className="sb-dot" />
           DATA REFRESHED DAILY &middot; {siteConfig.name}

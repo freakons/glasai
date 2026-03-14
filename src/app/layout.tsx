@@ -6,6 +6,7 @@ import { Topbar } from '@/components/layout/Topbar';
 import { Ticker } from '@/components/layout/Ticker';
 import { Footer } from '@/components/layout/Footer';
 import { AmbientBackground } from '@/components/layout/AmbientBackground';
+import { OnboardingProvider } from '@/components/onboarding/OnboardingProvider';
 import '@/styles/globals.css';
 
 const instrumentSerif = localFont({
@@ -83,6 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
         </div>
         <Footer />
+        <OnboardingProvider />
       </body>
     </html>
   );
