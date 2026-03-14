@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { MOCK_SIGNALS } from '@/data/mockSignals';
 import { clusterSignals } from '@/lib/signals/clusterSignals';
+import { computeTrendEvolution } from '@/lib/trends/trendEvolution';
+import { TrendEvolutionChart } from '@/components/intelligence/TrendEvolutionChart';
 import { Badge } from '@/components/ui/Badge';
 
 import type { Metadata } from 'next';
@@ -59,6 +61,7 @@ export default async function TrendPage({ params }: TrendPageProps) {
   if (!cluster) return notFound();
 
   const mc = MOMENTUM_COLORS[cluster.momentum];
+  const evolution = computeTrendEvolution(cluster.signals);
 
   return (
     <>
@@ -114,6 +117,12 @@ export default async function TrendPage({ params }: TrendPageProps) {
         <p style={{ margin: 0, fontSize: 14, color: 'var(--text)', lineHeight: 1.65 }}>
           {cluster.summary}
         </p>
+      </div>
+
+      {/* Trend Activity */}
+      <div style={{ ...GLASS_CARD, marginBottom: 20 }}>
+        <div style={SECTION_HEADER}>Trend Activity</div>
+        <TrendEvolutionChart evolution={evolution} />
       </div>
 
       {/* Entities */}
