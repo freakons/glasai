@@ -453,12 +453,10 @@ export default async function ComparePage(
       </div>
 
       {/* Side-by-side entity columns */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${entries.length}, 1fr)`,
-        gap: 16,
-        alignItems: 'start',
-      }}>
+      <div
+        className="compare-grid"
+        style={{ gridTemplateColumns: `repeat(${entries.length}, 1fr)` }}
+      >
         {entries.map((entry) => (
           <EntityColumn key={entry.slug} entry={entry} />
         ))}

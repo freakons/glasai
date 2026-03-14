@@ -104,11 +104,8 @@ export default async function SignalDetailPage(
             <span className="sig-badge sig-high">Notable</span>
           )}
           {signal.confidence >= 90 && (
-            <span style={{
-              fontFamily: 'var(--fm)', fontSize: 8, letterSpacing: '0.1em',
-              textTransform: 'uppercase', padding: '2px 8px', borderRadius: 10,
-              color: 'var(--emerald-l)', border: '1px solid rgba(5,150,105,0.4)',
-            }}>
+            <span className="verified">
+              <span className="indicator-dot indicator-dot--emerald" />
               Verified
             </span>
           )}
@@ -173,7 +170,7 @@ export default async function SignalDetailPage(
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
+      <div className="detail-grid">
 
         {/* Main content column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

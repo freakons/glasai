@@ -107,7 +107,7 @@ export function CorroborationIndicator({ data }: CorroborationIndicatorProps) {
   return (
     <div style={GLASS_CARD}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div style={SECTION_HEADER}>Signal Corroboration</div>
+        <div style={{ ...SECTION_HEADER, marginBottom: 0 }}>Signal Corroboration</div>
         <span
           style={{
             fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.1em',

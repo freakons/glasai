@@ -234,7 +234,7 @@ export default async function EntityDossierPage(
       </div>
 
       {/* Main content grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
+      <div className="detail-grid-wide">
 
         {/* Left column — signals + events */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

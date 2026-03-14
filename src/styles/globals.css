@@ -362,6 +362,18 @@ body {
 .ph-left p { font-family: var(--fm); font-size: 11px; font-weight: 400; color: var(--text2); letter-spacing: 0.04em; }
 .ph-divider { height: 1px; background: linear-gradient(90deg, var(--border2), transparent); margin: 18px 0; }
 
+/* Page header title — reusable heading style for .ph children */
+.ph-title {
+  font-family: var(--fd); font-size: 30px; font-style: italic; font-weight: 500;
+  letter-spacing: -0.02em; color: var(--text); line-height: 1.15; margin-bottom: 0;
+}
+/* Gradient highlight span inside .ph-title headings */
+.ph-hi {
+  background: linear-gradient(90deg, var(--indigo-l), var(--cyan-l));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  font-style: italic;
+}
+
 /* ══════════════════════════════════════
    FEED HEADER — Live intelligence banner
 ══════════════════════════════════════ */
@@ -449,10 +461,9 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 0; text-decoration: none; color: inherit;
   border-bottom: 1px solid rgba(255,255,255,0.03);
-  transition: opacity var(--t);
+  transition: background var(--t) var(--ease), opacity var(--t) var(--ease);
 }
 .eco-row:last-child { border-bottom: none; }
-.eco-row:hover { opacity: 0.8; }
 .eco-cat {
   font-family: var(--fm); font-size: 10px; font-weight: 600;
   letter-spacing: 0.04em; text-transform: uppercase;
@@ -978,6 +989,52 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* ══════════════════════════════════════
+   DETAIL PAGE LAYOUT GRIDS
+   2-column: main content + sidebar
+   Responsive: stacks below 900px
+══════════════════════════════════════ */
+
+/* Signal detail — narrower sidebar (280px) */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Entity dossier — wider sidebar (320px) */
+.detail-grid-wide {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Compare page — equal-width entity columns */
+.compare-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .detail-grid,
+  .detail-grid-wide {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .compare-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .detail-grid,
+  .detail-grid-wide {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ══════════════════════════════════════
    THREE-PANEL INTELLIGENCE LAYOUT

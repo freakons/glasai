@@ -21,7 +21,7 @@ const LEVEL_STYLES: Record<ImpactLevel, { color: string; borderColor: string }> 
 
 const BADGE_BASE: React.CSSProperties = {
   fontFamily: 'var(--fm)',
-  fontSize: 8,
+  fontSize: 9,
   letterSpacing: '0.1em',
   textTransform: 'uppercase',
   padding: '2px 8px',
