@@ -7,6 +7,7 @@ import { Ticker } from '@/components/layout/Ticker';
 import { Footer } from '@/components/layout/Footer';
 import { AmbientBackground } from '@/components/layout/AmbientBackground';
 import { OnboardingProvider } from '@/components/onboarding/OnboardingProvider';
+import { CommandPaletteProvider } from '@/components/command/CommandPaletteProvider';
 import '@/styles/globals.css';
 
 const instrumentSerif = localFont({
@@ -72,19 +73,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="theme-color" content="#05050f" />
       </head>
       <body>
-        <AmbientBackground />
-        <div className="app">
-          <Sidebar />
-          <main className="main-content">
-            <Topbar title="Om" highlight="terminal" />
-            <Ticker />
-            <div className="content page-enter">
-              {children}
-            </div>
-          </main>
-        </div>
-        <Footer />
-        <OnboardingProvider />
+        <CommandPaletteProvider>
+          <AmbientBackground />
+          <div className="app">
+            <Sidebar />
+            <main className="main-content">
+              <Topbar title="Om" highlight="terminal" />
+              <Ticker />
+              <div className="content page-enter">
+                {children}
+              </div>
+            </main>
+          </div>
+          <Footer />
+          <OnboardingProvider />
+        </CommandPaletteProvider>
       </body>
     </html>
   );

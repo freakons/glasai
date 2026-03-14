@@ -1,8 +1,11 @@
 'use client';
 
 import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { useCommandPalette } from '@/hooks/useCommandPalette';
 
 export function Topbar({ title, highlight }: { title: string; highlight: string }) {
+  const { open } = useCommandPalette();
+
   return (
     <div className="topbar">
       <button
@@ -19,13 +22,14 @@ export function Topbar({ title, highlight }: { title: string; highlight: string 
       <div className="topbar-title">
         {title} <span>{highlight}</span>
       </div>
-      <div className="search-wrap">
+      <button className="search-wrap" onClick={open} type="button">
         <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="11" cy="11" r="8" />
           <path d="m21 21-4.35-4.35" />
         </svg>
-        <input className="search-in" placeholder="Search intelligence… (press /)" />
-      </div>
+        <span className="search-placeholder">Search intelligence…</span>
+        <kbd className="search-kbd">⌘K</kbd>
+      </button>
       <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
         <NotificationBell />
         <button className="tb-btn primary">Request Access</button>
