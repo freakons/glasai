@@ -83,6 +83,10 @@ interface SignalRow {
   strategic_impact?: string | null;
   who_should_care?: string | null;
   prediction?: string | null;
+  // Intelligence status tracking (migration 015)
+  insight_generated?: boolean;
+  insight_generated_at?: string | null;
+  insight_generation_error?: string | null;
 }
 
 interface EventRow {

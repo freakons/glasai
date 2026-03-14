@@ -46,8 +46,8 @@ import { ingestGNews }                          from '@/services/ingestion/gnews
 import { ingestRss }                            from '@/services/ingestion/rssIngester';
 import { getRecentEvents }                      from '@/services/storage/eventStore';
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
-import { saveSignals, updateSignalInsight }     from '@/services/storage/signalStore';
-import { generateSignalInsight }                from '@/lib/intelligence/generateSignalInsight';
+import { saveSignals, updateSignalInsight, markInsightGenerationError } from '@/services/storage/signalStore';
+import { generateSignalInsightWithMeta }        from '@/lib/intelligence/generateSignalInsight';
 import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { generatePageSnapshots }               from '@/lib/pipeline/snapshot';
 import { refreshCaches }                        from '@/lib/pipeline/cacheRefresh';
@@ -404,30 +404,50 @@ export async function POST(req: NextRequest) {
 
       // Stage 2b — Intelligence layer ("Why This Matters") — non-blocking
       // Only process newly generated signals; failures are swallowed.
+      // Signals with existing insight (insight_generated=true) are skipped.
+      // Dedup/reuse is handled inside generateSignalInsightWithMeta.
       if (generatedSigs.length > 0) {
         const intel = await runStage(
           'intelligence',
           async () => {
             let insightsGenerated = 0;
+            let insightsReused = 0;
+            let insightsFailed = 0;
             for (const sig of generatedSigs) {
               try {
-                const insight = await generateSignalInsight({
+                const result = await generateSignalInsightWithMeta({
                   title: sig.title,
                   summary: sig.description,
                   entities: sig.affectedEntities ?? [],
                   signalType: sig.type,
                   direction: sig.direction,
                 });
+
+                if (result.error) {
+                  // Generation failed — record error for monitoring
+                  await markInsightGenerationError(sig.id, result.error);
+                  insightsFailed++;
+                  continue;
+                }
+
+                const insight = result.insight;
                 // Only persist if at least one field was generated
                 if (insight.why_this_matters || insight.strategic_impact || insight.who_should_care) {
                   await updateSignalInsight(sig.id, insight);
                   insightsGenerated++;
+                  if (result.reused) insightsReused++;
                 }
               } catch {
                 // Per-signal failure is non-fatal
+                insightsFailed++;
               }
             }
-            return { insightsGenerated, signalsProcessed: generatedSigs.length };
+            return {
+              insightsGenerated,
+              insightsReused,
+              insightsFailed,
+              signalsProcessed: generatedSigs.length,
+            };
           },
           TIMEOUT.SIGNALS,
           correlationId,
