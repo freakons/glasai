@@ -8,6 +8,7 @@ import {
   getEntityMetrics,
 } from '@/db/queries';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
+import { WatchlistButton } from '@/components/watchlist/WatchlistButton';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -138,13 +139,21 @@ export default async function EntityDossierPage(
           )}
         </div>
 
-        {/* Entity name */}
-        <h1 style={{
-          fontFamily: 'var(--fd)', fontSize: 34, fontStyle: 'italic',
-          color: 'var(--text)', letterSpacing: '-0.02em', marginBottom: 10,
-        }}>
-          {entity.name}
-        </h1>
+        {/* Entity name + watchlist action */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 10, flexWrap: 'wrap' }}>
+          <h1 style={{
+            fontFamily: 'var(--fd)', fontSize: 34, fontStyle: 'italic',
+            color: 'var(--text)', letterSpacing: '-0.02em', margin: 0,
+          }}>
+            {entity.name}
+          </h1>
+          <WatchlistButton
+            slug={slug}
+            name={entity.name}
+            sector={entity.sector ?? undefined}
+            country={entity.country ?? undefined}
+          />
+        </div>
 
         {/* Description */}
         {entity.summary ? (
