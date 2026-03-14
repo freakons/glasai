@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { AiEvent } from '@/data/mockEvents';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13,11 +14,7 @@ const ROW: React.CSSProperties = {
   border: '1px solid var(--border)',
   background: 'var(--glass)',
   transition: 'border-color var(--t) var(--ease)',
-};
-
-const ROW_HOVER: React.CSSProperties = {
-  ...ROW,
-  cursor: 'pointer',
+  textDecoration: 'none',
 };
 
 const TITLE: React.CSSProperties = {
@@ -56,6 +53,16 @@ const AMOUNT: React.CSSProperties = {
   color: 'var(--amber-l)',
 };
 
+const SOURCE_LINK: React.CSSProperties = {
+  fontFamily: 'var(--fm)',
+  fontSize: 8,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: 'var(--text3)',
+  textDecoration: 'none',
+  marginLeft: 'auto',
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,39 +79,49 @@ function formatDate(iso: string): string {
 
 interface SupportingEventRowProps {
   event: AiEvent;
-  /** Optional source URL — when present the row becomes a link. */
+  /** Optional source URL — rendered as a secondary action link. */
   sourceUrl?: string;
 }
 
 export function SupportingEventRow({ event, sourceUrl }: SupportingEventRowProps) {
-  const content = (
-    <>
-      <span style={TITLE}>{event.title}</span>
-      <div style={META_ROW}>
-        <span style={TYPE_TAG}>{event.type}</span>
-        <span style={META_TEXT}>{formatDate(event.date)}</span>
-        {event.entityName && (
-          <span style={META_TEXT}>{event.entityName}</span>
-        )}
-        {event.amount && (
-          <span style={AMOUNT}>{event.amount}</span>
-        )}
-      </div>
-    </>
+  const meta = (
+    <div style={META_ROW}>
+      <span style={TYPE_TAG}>{event.type}</span>
+      <span style={META_TEXT}>{formatDate(event.date)}</span>
+      {event.entityName && (
+        <span style={META_TEXT}>{event.entityName}</span>
+      )}
+      {event.amount && (
+        <span style={AMOUNT}>{event.amount}</span>
+      )}
+      {sourceUrl && (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={SOURCE_LINK}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Source ↗
+        </a>
+      )}
+    </div>
   );
 
-  if (sourceUrl) {
+  // Primary action: link to event detail page when event has an id
+  if (event.id) {
     return (
-      <a
-        href={sourceUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ ...ROW_HOVER, textDecoration: 'none' }}
-      >
-        {content}
-      </a>
+      <Link href={`/events/${event.id}`} style={{ ...ROW, cursor: 'pointer' }}>
+        <span style={TITLE}>{event.title}</span>
+        {meta}
+      </Link>
     );
   }
 
-  return <div style={ROW}>{content}</div>;
+  return (
+    <div style={ROW}>
+      <span style={TITLE}>{event.title}</span>
+      {meta}
+    </div>
+  );
 }

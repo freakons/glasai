@@ -590,6 +590,91 @@ export async function getSupportingEventsForSignal(
 }
 
 /**
+ * Fetch a single event by ID for the event detail page.
+ *
+ * Returns null when the event doesn't exist or the DB is unavailable.
+ */
+export async function getEventById(id: string): Promise<AiEvent | null> {
+  try {
+    const rows = await dbQuery<EventRow>`
+      SELECT
+        id, type, title, description,
+        entity_id, entity_name, company,
+        amount, signal_ids, timestamp, created_at
+      FROM events
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rowToEvent(rows[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch signals linked to a given event.
+ *
+ * Resolution: uses the event's signal_ids[] array for direct linkage,
+ * then falls back to signals sharing the same entity_name.
+ *
+ * @param eventId     The event ID.
+ * @param signalIds   Direct signal ID references from the event.
+ * @param entityName  The event's entity name (used for fallback matching).
+ * @param limit       Maximum signals to return (default 10).
+ */
+export async function getSignalsForEvent(
+  eventId: string,
+  signalIds: string[] | undefined,
+  entityName: string,
+  limit = 10,
+): Promise<Signal[]> {
+  const safeLimit = Math.min(Math.max(1, limit), 50);
+
+  try {
+    const rows = await dbQuery<SignalRow>`
+      WITH direct AS (
+        -- Signals directly referenced by event.signal_ids[]
+        SELECT s.*
+        FROM signals s
+        WHERE ${signalIds && signalIds.length > 0}
+          AND s.id = ANY(${signalIds ?? []}::text[])
+      ),
+      backref AS (
+        -- Signals whose supporting_events[] contain this event
+        SELECT s.*
+        FROM signals s
+        WHERE s.supporting_events @> ARRAY[${eventId}]::text[]
+      ),
+      entity_match AS (
+        -- Fallback: signals for the same entity
+        SELECT s.*
+        FROM signals s
+        WHERE s.entity_name = ${entityName}
+          AND s.entity_name != ''
+          AND (s.status IS NULL OR s.status NOT IN ('rejected'))
+      ),
+      combined AS (
+        SELECT * FROM direct
+        UNION
+        SELECT * FROM backref
+        UNION
+        SELECT * FROM entity_match
+      )
+      SELECT
+        id, title, summary, description, category, signal_type,
+        entity_id, entity_name, confidence, confidence_score,
+        date, created_at, significance_score, source_support_count
+      FROM combined
+      ORDER BY significance_score DESC NULLS LAST, created_at DESC
+      LIMIT ${safeLimit}
+    `;
+    return rows.map(rowToSignal);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch AI ecosystem events from the database.
  *
  * Reads from the `events` table populated by the ingestion pipeline.
