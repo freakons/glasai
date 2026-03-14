@@ -5,6 +5,7 @@ import { getSignalById, getRelatedSignals, getSupportingEventsForSignal, getSour
 import { Badge } from '@/components/ui/Badge';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { EvidencePanel } from '@/components/signals/EvidencePanel';
+import { CorroborationIndicator, computeCorroboration } from '@/components/signals/CorroborationIndicator';
 import { ConfidenceBreakdown } from '@/components/signals/ConfidenceBreakdown';
 import { SourceArticlesPanel } from '@/components/signals/SourceArticlesPanel';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
@@ -204,6 +205,16 @@ export default async function SignalDetailPage(
 
           {/* Evidence Panel — structured evidence chain */}
           <EvidencePanel signal={signal} supportingEvents={supportingEvents} />
+
+          {/* Signal Corroboration — at-a-glance strength indicator */}
+          <CorroborationIndicator
+            data={computeCorroboration({
+              sourceSupportCount: signal.sourceSupportCount,
+              supportingEventsCount: supportingEvents.length,
+              articles: sourceArticles,
+              confidenceScore: signal.confidence,
+            })}
+          />
 
           {/* Confidence Breakdown — score explanation with factors */}
           <ConfidenceBreakdown signal={signal} />
