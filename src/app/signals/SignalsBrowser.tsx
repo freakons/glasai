@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { type Signal, type SignalCategory, type SignalContext } from '@/data/mockSignals';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalMomentumBadge } from '@/components/signals/SignalMomentumBadge';
 import { CommandBar } from '@/ui/layout/CommandBar';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,6 +248,9 @@ function SignalItem({ signal }: { signal: Signal }) {
             }}
             showLabel={false}
           />
+          {signal.momentum && (
+            <SignalMomentumBadge momentum={signal.momentum} showLabel={false} />
+          )}
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/Badge';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalMomentumBadge } from '@/components/signals/SignalMomentumBadge';
 import { SignalContextPreview } from '@/components/signals/SignalContextPreview';
 import { EntityQuickProfile } from '@/components/entity/EntityQuickProfile';
 import type { SignalWithRankMeta } from '@/lib/signals/feedComposer';
@@ -66,6 +67,9 @@ export function SignalCard({ signal }: SignalCardProps) {
               }}
               showLabel={false}
             />
+            {signal.momentum && (
+              <SignalMomentumBadge momentum={signal.momentum} showLabel={false} />
+            )}
           </div>
           <div className="nc-indicators">
             {sourceCount != null && sourceCount > 1 && (

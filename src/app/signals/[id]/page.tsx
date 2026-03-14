@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { getSignalById, getRelatedSignals, getSupportingEventsForSignal, getSourceArticlesForSignal } from '@/db/queries';
+import { getSignalById, getRelatedSignals, getSupportingEventsForSignal, getSourceArticlesForSignal, getSignalMomentum } from '@/db/queries';
 import { Badge } from '@/components/ui/Badge';
 import { SupportingEventRow } from '@/components/events/SupportingEventRow';
 import { EvidencePanel } from '@/components/signals/EvidencePanel';
@@ -9,6 +9,7 @@ import { CorroborationIndicator, computeCorroboration } from '@/components/signa
 import { ConfidenceBreakdown } from '@/components/signals/ConfidenceBreakdown';
 import { SourceArticlesPanel } from '@/components/signals/SourceArticlesPanel';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalMomentumBadge } from '@/components/signals/SignalMomentumBadge';
 import { getSignificanceTier } from '@/lib/signals/feedComposer';
 import { slugify } from '@/utils/sanitize';
 
@@ -62,11 +63,15 @@ export default async function SignalDetailPage(
   if (!signal) notFound();
 
   const tier = getSignificanceTier(signal.significanceScore);
-  const [relatedSignals, supportingEvents, sourceArticles] = await Promise.all([
+  const [relatedSignals, supportingEvents, sourceArticles, momentumData] = await Promise.all([
     getRelatedSignals(signal.id, signal.entityName, 5).catch(() => []),
     getSupportingEventsForSignal(signal.id, signal.entityName, 10).catch(() => []),
     getSourceArticlesForSignal(signal.id, signal.entityName, 10).catch(() => []),
+    getSignalMomentum(signal.id, signal.entityName).catch(() => null),
   ]);
+
+  // Fallback: if momentum query failed, use safe defaults (stable)
+  const momentum = momentumData ?? { recentCount: 0, previousCount: 0 };
 
   return (
     <div className="page-enter">
@@ -115,6 +120,7 @@ export default async function SignalDetailPage(
             sourceSupportCount: signal.sourceSupportCount,
             affectedEntitiesCount: signal.context?.affectedEntities?.length ?? null,
           }} />
+          <SignalMomentumBadge momentum={momentum} />
         </div>
 
         {/* Title */}

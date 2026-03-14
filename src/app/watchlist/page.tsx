@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useWatchlist, type WatchedEntity } from '@/hooks/useWatchlist';
 import { Badge } from '@/components/ui/Badge';
 import { SignalImpactBadge } from '@/components/signals/SignalImpactBadge';
+import { SignalMomentumBadge } from '@/components/signals/SignalMomentumBadge';
 import type { Signal } from '@/data/mockSignals';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +199,9 @@ function SignalRow({ signal }: { signal: Signal }) {
           }}
           showLabel={false}
         />
+        {signal.momentum && (
+          <SignalMomentumBadge momentum={signal.momentum} showLabel={false} />
+        )}
         {signal.confidence >= 85 && (
           <span style={{
             fontFamily: 'var(--fm)', fontSize: 9, letterSpacing: '0.06em',

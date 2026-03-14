@@ -1,5 +1,5 @@
 import { fetchArticles, fetchFeaturedArticle } from '@/lib/dataService';
-import { getSignals, getSiteStats, getEcosystemActivitySnapshot } from '@/db/queries';
+import { getSignals, getSiteStats, getEcosystemActivitySnapshot, getSignalsMomentumBatch } from '@/db/queries';
 import { formatFundingTotal } from '@/lib/parseFundingAmount';
 import { FeaturedCard } from '@/components/cards/FeaturedCard';
 import { StatCard } from '@/components/ui/StatCard';
@@ -34,6 +34,16 @@ export default async function IntelligencePage() {
 
   // Compose the signal feed with diversity + dedup + ranking
   const composedSignals = composeFeed(rawSignals, { minSignificance: 30 });
+
+  // Batch-compute momentum for all composed signals
+  const momentumMap = await getSignalsMomentumBatch(
+    composedSignals.map((s) => s.id),
+  ).catch(() => new Map<string, { recentCount: number; previousCount: number }>());
+
+  // Attach momentum data to signals
+  for (const signal of composedSignals) {
+    signal.momentum = momentumMap.get(signal.id) ?? null;
+  }
 
   // Core counts — live from DB only, no hardcoded fallbacks
   const signals     = String(live.signals);

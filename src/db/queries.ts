@@ -1304,6 +1304,124 @@ export async function getSourceArticlesForSignal(
 }
 
 /**
+ * Compute momentum data for a signal by counting supporting events
+ * in two 7-day windows: recent (last 7 days) and previous (8–14 days ago).
+ *
+ * Uses the same 3-strategy event resolution as getSupportingEventsForSignal:
+ *   1. Direct linkage via signals.supporting_events[]
+ *   2. Back-reference via events.signal_ids[]
+ *   3. Entity fallback for events sharing the same entity_name
+ *
+ * Returns { recentCount, previousCount } or null if the query fails.
+ */
+export async function getSignalMomentum(
+  signalId: string,
+  entityName: string,
+): Promise<{ recentCount: number; previousCount: number } | null> {
+  try {
+    const rows = await dbQuery<{ recent_count: string; previous_count: string }>`
+      WITH signal_events AS (
+        -- Strategy 1: Direct linkage
+        SELECT e.timestamp
+        FROM events e
+        INNER JOIN signals s ON s.id = ${signalId}
+        WHERE e.id = ANY(s.supporting_events)
+        UNION
+        -- Strategy 2: Back-reference
+        SELECT e.timestamp
+        FROM events e
+        WHERE e.signal_ids @> ARRAY[${signalId}]::text[]
+        UNION
+        -- Strategy 3: Entity fallback (90-day window)
+        SELECT e.timestamp
+        FROM events e
+        WHERE e.entity_name = ${entityName}
+          AND e.entity_name != ''
+          AND e.timestamp >= NOW() - INTERVAL '90 days'
+      )
+      SELECT
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
+        ) AS recent_count,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '14 days'
+            AND timestamp < NOW() - INTERVAL '7 days'
+        ) AS previous_count
+      FROM signal_events
+    `;
+
+    if (rows.length === 0) return { recentCount: 0, previousCount: 0 };
+
+    return {
+      recentCount: parseInt(rows[0].recent_count, 10) || 0,
+      previousCount: parseInt(rows[0].previous_count, 10) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Batch-compute momentum data for multiple signals in a single query.
+ *
+ * Uses direct linkage (signals.supporting_events[]) and back-reference
+ * (events.signal_ids[]) strategies. Skips entity fallback for efficiency
+ * in batch contexts — detail pages use the full resolution via getSignalMomentum.
+ *
+ * Returns a Map keyed by signal ID with { recentCount, previousCount }.
+ */
+export async function getSignalsMomentumBatch(
+  signalIds: string[],
+): Promise<Map<string, { recentCount: number; previousCount: number }>> {
+  const result = new Map<string, { recentCount: number; previousCount: number }>();
+  if (signalIds.length === 0) return result;
+
+  try {
+    const rows = await dbQuery<{
+      signal_id: string;
+      recent_count: string;
+      previous_count: string;
+    }>`
+      WITH signal_event_pairs AS (
+        -- Strategy 1: Direct linkage
+        SELECT s.id AS signal_id, e.timestamp
+        FROM signals s
+        INNER JOIN events e ON e.id = ANY(s.supporting_events)
+        WHERE s.id = ANY(${signalIds}::text[])
+        UNION
+        -- Strategy 2: Back-reference
+        SELECT unnest(e.signal_ids) AS signal_id, e.timestamp
+        FROM events e
+        WHERE e.signal_ids && ${signalIds}::text[]
+      )
+      SELECT
+        signal_id,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
+        ) AS recent_count,
+        COUNT(*) FILTER (
+          WHERE timestamp >= NOW() - INTERVAL '14 days'
+            AND timestamp < NOW() - INTERVAL '7 days'
+        ) AS previous_count
+      FROM signal_event_pairs
+      WHERE signal_id = ANY(${signalIds}::text[])
+      GROUP BY signal_id
+    `;
+
+    for (const row of rows) {
+      result.set(row.signal_id, {
+        recentCount: parseInt(row.recent_count, 10) || 0,
+        previousCount: parseInt(row.previous_count, 10) || 0,
+      });
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/**
  * Fetch articles from the database.
  *
  * Reads from the `articles` table populated by the ingestion pipeline.
