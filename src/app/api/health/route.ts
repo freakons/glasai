@@ -374,9 +374,28 @@ export async function GET(req: NextRequest) {
   }
 
   const activeProvider = getActiveProviderName();
+
+  // Determine which keys are present (boolean — never log values)
+  const groqKeyPresent  = Boolean(process.env.GROQ_API_KEY);
+  const grokKeyPresent  = Boolean(process.env.GROK_API_KEY);
+  const openaiKeyPresent = Boolean(process.env.OPENAI_API_KEY);
+
+  // Resolve rate-limit protection constants from the Groq provider if active
+  const { GroqProvider } = await import('@/lib/ai/groq').catch(() => ({ GroqProvider: null }));
+  const groqProtection = GroqProvider ? GroqProvider.rateLimitProtection : null;
+
   if (llmError) {
-    subsystems.llm = { status: 'degraded', message: llmError };
-    warnings.push(`LLM provider unavailable — intelligence generation will fail. Fix: set GROQ_API_KEY (or GROK_API_KEY / OPENAI_API_KEY) in Vercel env vars`);
+    const isKeyMissing = llmError.includes('No AI provider') || llmError.includes('API_KEY is required');
+    subsystems.llm = {
+      status: 'degraded',
+      message: isKeyMissing
+        ? 'No LLM API key configured — intelligence generation is disabled'
+        : llmError,
+    };
+    warnings.push(
+      `LLM provider unavailable — intelligence generation disabled.` +
+      ` Fix: set GROQ_API_KEY in Vercel env vars (or GROK_API_KEY / OPENAI_API_KEY)`,
+    );
   } else {
     subsystems.llm = { status: 'healthy' };
   }
@@ -532,13 +551,24 @@ export async function GET(req: NextRequest) {
     },
 
     llm: {
-      provider:      activeProvider ?? 'not_resolved',
-      hasGroq:       Boolean(process.env.GROQ_API_KEY),
-      hasGrok:       Boolean(process.env.GROK_API_KEY),
-      hasOpenAI:     Boolean(process.env.OPENAI_API_KEY),
-      aiProviderEnv: process.env.AI_PROVIDER ?? '(auto)',
+      provider:             activeProvider ?? 'not_resolved',
+      groqKeyPresent,
+      grokKeyPresent,
+      openaiKeyPresent,
+      aiProviderEnv:        process.env.AI_PROVIDER ?? '(auto)',
+      intelligenceEnabled:  !llmError,
       ...(llmError ? { error: llmError } : {}),
-      intelligenceEnabled: !llmError,
+      rateLimitProtection: groqProtection
+        ? {
+            active:                true,
+            provider:              'groq',
+            maxConcurrentRequests: groqProtection.maxConcurrentRequests,
+            maxRetriesOnRateLimit: groqProtection.maxRetriesOnRateLimit,
+            callTimeoutMs:         groqProtection.callTimeoutMs,
+            retryableStatusCodes:  groqProtection.retryableStatusCodes,
+            batchLimit:            parseInt(process.env.INTELLIGENCE_BATCH_LIMIT ?? '10', 10),
+          }
+        : { active: false },
     },
 
     sources: sourceCoverage ?? { status: 'unavailable' },

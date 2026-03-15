@@ -73,6 +73,13 @@ const TIMEOUT = {
   OVERALL:      parseInt(process.env.PIPELINE_TIMEOUT_MS              ?? '290000', 10),
 } as const;
 
+/**
+ * Maximum insights generated per pipeline run (Groq free-tier protection).
+ * Prevents exhausting quota when a large batch of articles is ingested.
+ * Override via INTELLIGENCE_BATCH_LIMIT env var.
+ */
+const MAX_INSIGHTS_PER_RUN = parseInt(process.env.INTELLIGENCE_BATCH_LIMIT ?? '10', 10);
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -508,6 +515,16 @@ export async function POST(req: NextRequest) {
       // Signals with existing insight (insight_generated=true) are skipped.
       // Dedup/reuse is handled inside generateSignalInsightWithMeta.
       if (generatedSigs.length > 0) {
+        // Batch cap: protect Groq free-tier quota by limiting insights per run.
+        const sigsToProcess = generatedSigs.slice(0, MAX_INSIGHTS_PER_RUN);
+        const batchCapped   = sigsToProcess.length < generatedSigs.length;
+        if (batchCapped) {
+          console.log(
+            `[pipeline] intelligence batch capped at ${MAX_INSIGHTS_PER_RUN} of ${generatedSigs.length}` +
+            ` signals — free-tier rate-limit protection (INTELLIGENCE_BATCH_LIMIT=${MAX_INSIGHTS_PER_RUN})`,
+          );
+        }
+
         const intel = await runStage(
           'intelligence',
           async () => {
@@ -520,29 +537,37 @@ export async function POST(req: NextRequest) {
               providerName = checkName();
             } catch (err) {
               providerError = err instanceof Error ? err.message : String(err);
-              console.error(`[pipeline] intelligence pre-flight failed: ${providerError}`);
+              const isKeyMissing = (providerError ?? '').includes('No AI provider')
+                || (providerError ?? '').includes('API_KEY is required');
+              console.error(
+                `[pipeline] intelligence pre-flight failed provider=${providerName ?? 'none'}` +
+                ` keyMissing=${isKeyMissing}: ${providerError}`,
+              );
               return {
                 insightsGenerated: 0,
                 insightsReused: 0,
-                insightsFailed: generatedSigs.length,
-                signalsProcessed: generatedSigs.length,
+                insightsFailed: sigsToProcess.length,
+                signalsProcessed: sigsToProcess.length,
+                signalsSkippedByBatchCap: generatedSigs.length - sigsToProcess.length,
+                batchCapped,
+                batchLimit: MAX_INSIGHTS_PER_RUN,
                 provider: providerName,
                 providerError,
               };
             }
 
             let insightsGenerated = 0;
-            let insightsReused = 0;
-            let insightsFailed = 0;
+            let insightsReused    = 0;
+            let insightsFailed    = 0;
             let lastError: string | null = null;
-            for (const sig of generatedSigs) {
+            for (const sig of sigsToProcess) {
               try {
                 const result = await generateSignalInsightWithMeta({
-                  title: sig.title,
-                  summary: sig.description,
-                  entities: sig.affectedEntities ?? [],
+                  title:      sig.title,
+                  summary:    sig.description,
+                  entities:   sig.affectedEntities ?? [],
                   signalType: sig.type,
-                  direction: sig.direction,
+                  direction:  sig.direction,
                 });
 
                 if (result.error) {
@@ -550,6 +575,10 @@ export async function POST(req: NextRequest) {
                   await markInsightGenerationError(sig.id, result.error);
                   insightsFailed++;
                   lastError = result.error;
+                  console.warn(
+                    `[pipeline] insight failed provider=${providerName ?? 'none'}` +
+                    ` signal="${sig.title.slice(0, 60)}" error="${result.error}"`,
+                  );
                   continue;
                 }
 
@@ -564,13 +593,20 @@ export async function POST(req: NextRequest) {
                 // Per-signal failure is non-fatal
                 insightsFailed++;
                 lastError = err instanceof Error ? err.message : String(err);
+                console.warn(
+                  `[pipeline] insight threw provider=${providerName ?? 'none'}` +
+                  ` signal="${sig.title.slice(0, 60)}" error="${lastError}"`,
+                );
               }
             }
             return {
               insightsGenerated,
               insightsReused,
               insightsFailed,
-              signalsProcessed: generatedSigs.length,
+              signalsProcessed: sigsToProcess.length,
+              signalsSkippedByBatchCap: generatedSigs.length - sigsToProcess.length,
+              batchCapped,
+              batchLimit: MAX_INSIGHTS_PER_RUN,
               provider: providerName,
               providerError,
               lastError: insightsFailed > 0 ? lastError : null,
