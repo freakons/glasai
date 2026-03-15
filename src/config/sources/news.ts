@@ -371,7 +371,7 @@ export const newsSources: SourceDefinition[] = [
     enabled: true,
   },
   {
-    id: 'aws_ml_blog',
+    id: 'aws_ml_blog_news',
     name: 'AWS Machine Learning Blog',
     type: 'rss',
     category: 'news',

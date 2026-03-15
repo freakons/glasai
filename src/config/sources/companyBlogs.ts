@@ -192,7 +192,7 @@ export const companyBlogSources: SourceDefinition[] = [
     url: 'https://inflection.ai/rss',
     entity: 'Inflection AI',
     reliability: 10,
-    enabled: true,
+    enabled: false, // Inflection AI was absorbed by Microsoft in 2024
   },
 
   // ── AI infrastructure vendors (9) ─────────────────────────────────────────
@@ -318,7 +318,7 @@ export const companyBlogSources: SourceDefinition[] = [
     url: 'https://getcruise.com/news/rss',
     entity: 'Cruise',
     reliability: 8,
-    enabled: true,
+    enabled: false, // Cruise shut down autonomous operations in 2024
   },
   {
     id: 'boston_dynamics_blog',

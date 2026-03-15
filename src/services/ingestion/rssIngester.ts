@@ -265,12 +265,24 @@ export async function ingestRss(): Promise<RssIngestResult> {
   const starvationWarning =
     result.articlesNew === 0 && result.sourcesFailed >= result.sourcesAttempted / 2;
 
+  // Log which categories were actually fetched for operational visibility
+  const categoriesAttempted = new Set(
+    [...highPriority, ...normalPriority].map((s) => s.category)
+  );
+  const allCategories = ['news', 'company', 'research', 'developer', 'social', 'policy'];
+  const missingCategories = allCategories.filter((c) => !categoriesAttempted.has(c as typeof allEnabled[0]['category']));
+
+  if (missingCategories.length > 0) {
+    console.warn(`[rssIngester] Categories with 0 enabled sources: ${missingCategories.join(', ')}`);
+  }
+
   console.log(
     `[rssIngester] Done. ` +
     `sources=${result.sourcesAttempted} failed=${result.sourcesFailed} ` +
     `rateLimited=${result.sourcesRateLimited} empty=${result.sourcesEmpty} ` +
     `articlesNew=${result.articlesNew} articlesDeduped=${result.articlesDeduped} ` +
-    `eventsNew=${result.eventsNew} eventsDeduped=${result.eventsDeduped}` +
+    `eventsNew=${result.eventsNew} eventsDeduped=${result.eventsDeduped} ` +
+    `categoriesActive=${categoriesAttempted.size}/${allCategories.length}` +
     (starvationWarning ? ' — WARNING: source starvation detected' : '')
   );
 

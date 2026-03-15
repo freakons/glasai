@@ -376,9 +376,31 @@ export async function GET(req: NextRequest) {
   const activeProvider = getActiveProviderName();
   if (llmError) {
     subsystems.llm = { status: 'degraded', message: llmError };
-    warnings.push(`LLM provider unavailable: ${llmError}`);
+    warnings.push(`LLM provider unavailable — intelligence generation will fail. Fix: set GROQ_API_KEY (or GROK_API_KEY / OPENAI_API_KEY) in Vercel env vars`);
   } else {
     subsystems.llm = { status: 'healthy' };
+  }
+
+  // ── 7b. Source coverage — how many sources are active per category ─────
+  let sourceCoverage: { totalConfigured: number; totalEnabled: number; disabledCategories: string[] } | null = null;
+  try {
+    const { allSources: allSrc, getEnabledSources: getEnabled } = await import('@/config/sources/index');
+    const enabledSrc = getEnabled();
+    const categories = ['news', 'company', 'research', 'developer', 'social', 'policy'] as const;
+    const disabledCategories = categories.filter(
+      cat => enabledSrc.filter(s => s.category === cat).length === 0
+        && allSrc.filter(s => s.category === cat).length > 0
+    );
+    sourceCoverage = {
+      totalConfigured: allSrc.length,
+      totalEnabled: enabledSrc.length,
+      disabledCategories,
+    };
+    if (disabledCategories.length > 0) {
+      warnings.push(`Source categories with 0 enabled feeds: ${disabledCategories.join(', ')} — check src/config/sources/`);
+    }
+  } catch {
+    // Non-critical
   }
 
   // ── 8. Environment readiness ──────────────────────────────────────────────
@@ -516,7 +538,10 @@ export async function GET(req: NextRequest) {
       hasOpenAI:     Boolean(process.env.OPENAI_API_KEY),
       aiProviderEnv: process.env.AI_PROVIDER ?? '(auto)',
       ...(llmError ? { error: llmError } : {}),
+      intelligenceEnabled: !llmError,
     },
+
+    sources: sourceCoverage ?? { status: 'unavailable' },
 
     env: {
       missingCritical: missingCriticalEnv,

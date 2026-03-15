@@ -230,6 +230,7 @@ export async function generateSignalInsightWithMeta(
 
   try {
     const provider = await getProvider();
+    const providerName = getActiveProviderName() ?? 'unknown';
     const prompt = buildInsightPrompt(input);
 
     const raw = await withTimeout(
@@ -241,16 +242,22 @@ export async function generateSignalInsightWithMeta(
     const insight = parseInsightResponse(raw);
 
     console.log(
-      `[generateSignalInsight] provider=${getActiveProviderName() ?? 'unknown'}` +
+      `[generateSignalInsight] provider=${providerName}` +
       ` title="${input.title.slice(0, 60)}" success=true`,
     );
 
     return { insight, reused: false };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error(
-      `[generateSignalInsight] generation failed for "${input.title.slice(0, 60)}":`,
-      errorMsg,
+    // Distinguish provider availability errors from generation errors
+    const isProviderMissing = errorMsg.includes('No AI provider available')
+      || errorMsg.includes('API_KEY is required');
+    const logLevel = isProviderMissing ? 'warn' : 'error';
+    const hint = isProviderMissing
+      ? ' — set GROQ_API_KEY (or GROK_API_KEY / OPENAI_API_KEY) in env'
+      : '';
+    console[logLevel](
+      `[generateSignalInsight] failed for "${input.title.slice(0, 60)}": ${errorMsg}${hint}`,
     );
     return { insight: { ...EMPTY_INSIGHT }, reused: false, error: errorMsg };
   }

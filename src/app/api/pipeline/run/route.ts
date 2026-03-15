@@ -65,11 +65,12 @@ export const maxDuration = 300;
 // With maxDuration=300 (Vercel Pro), we can afford generous per-stage timeouts.
 // Overall timeout is 290s (leaving 10s for response serialization).
 const TIMEOUT = {
-  INGEST:   parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS   ?? '120000', 10),
-  SIGNALS:  parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS  ?? '30000',  10),
-  SNAPSHOT: parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS ?? '60000',  10),
-  CACHE:    parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS    ?? '10000',  10),
-  OVERALL:  parseInt(process.env.PIPELINE_TIMEOUT_MS          ?? '290000', 10),
+  INGEST:       parseInt(process.env.PIPELINE_INGEST_TIMEOUT_MS       ?? '120000', 10),
+  SIGNALS:      parseInt(process.env.PIPELINE_SIGNALS_TIMEOUT_MS      ?? '30000',  10),
+  INTELLIGENCE: parseInt(process.env.PIPELINE_INTELLIGENCE_TIMEOUT_MS ?? '60000',  10),
+  SNAPSHOT:     parseInt(process.env.PIPELINE_SNAPSHOT_TIMEOUT_MS      ?? '60000',  10),
+  CACHE:        parseInt(process.env.PIPELINE_CACHE_TIMEOUT_MS        ?? '10000',  10),
+  OVERALL:      parseInt(process.env.PIPELINE_TIMEOUT_MS              ?? '290000', 10),
 } as const;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -510,9 +511,30 @@ export async function POST(req: NextRequest) {
         const intel = await runStage(
           'intelligence',
           async () => {
+            // Pre-flight: verify LLM provider is available before processing signals
+            let providerName: string | null = null;
+            let providerError: string | null = null;
+            try {
+              const { getProvider: checkProvider, getActiveProviderName: checkName } = await import('@/lib/ai');
+              await checkProvider();
+              providerName = checkName();
+            } catch (err) {
+              providerError = err instanceof Error ? err.message : String(err);
+              console.error(`[pipeline] intelligence pre-flight failed: ${providerError}`);
+              return {
+                insightsGenerated: 0,
+                insightsReused: 0,
+                insightsFailed: generatedSigs.length,
+                signalsProcessed: generatedSigs.length,
+                provider: providerName,
+                providerError,
+              };
+            }
+
             let insightsGenerated = 0;
             let insightsReused = 0;
             let insightsFailed = 0;
+            let lastError: string | null = null;
             for (const sig of generatedSigs) {
               try {
                 const result = await generateSignalInsightWithMeta({
@@ -527,6 +549,7 @@ export async function POST(req: NextRequest) {
                   // Generation failed — record error for monitoring
                   await markInsightGenerationError(sig.id, result.error);
                   insightsFailed++;
+                  lastError = result.error;
                   continue;
                 }
 
@@ -537,9 +560,10 @@ export async function POST(req: NextRequest) {
                   insightsGenerated++;
                   if (result.reused) insightsReused++;
                 }
-              } catch {
+              } catch (err) {
                 // Per-signal failure is non-fatal
                 insightsFailed++;
+                lastError = err instanceof Error ? err.message : String(err);
               }
             }
             return {
@@ -547,9 +571,12 @@ export async function POST(req: NextRequest) {
               insightsReused,
               insightsFailed,
               signalsProcessed: generatedSigs.length,
+              provider: providerName,
+              providerError,
+              lastError: insightsFailed > 0 ? lastError : null,
             };
           },
-          TIMEOUT.SIGNALS,
+          TIMEOUT.INTELLIGENCE,
           correlationId,
         );
         if (intel.error) {

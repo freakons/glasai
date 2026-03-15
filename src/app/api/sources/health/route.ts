@@ -26,7 +26,8 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { dbQuery, tableExists } from '@/db/client';
-import { getSourceById } from '@/config/sources/index';
+import { getSourceById, allSources, getEnabledSources } from '@/config/sources/index';
+import type { SourceCategory } from '@/types/sources';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
@@ -164,6 +165,21 @@ export async function GET(_req: NextRequest) {
     .sort((a, b) => b.articlesFetched - a.articlesFetched)
     .slice(0, TOP_SOURCES_LIMIT);
 
+  // ── Source category coverage ─────────────────────────────────────────────
+  // Show how many sources are configured vs enabled vs recently healthy per category
+  const categories: SourceCategory[] = ['news', 'company', 'research', 'developer', 'social', 'policy'];
+  const enabledSources = getEnabledSources();
+  const categoryStats = categories.map((cat) => {
+    const configured = allSources.filter(s => s.category === cat).length;
+    const enabled = enabledSources.filter(s => s.category === cat).length;
+    const healthyInDb = summaries.filter(s => {
+      const def = getSourceById(s.sourceId);
+      if (!def || def.category !== cat) return false;
+      return s.lastSuccessAt !== null && (now - new Date(s.lastSuccessAt).getTime()) < healthyCutoff;
+    }).length;
+    return { category: cat, configured, enabled, recentlyHealthy: healthyInDb };
+  });
+
   return NextResponse.json({
     totalSources:   rows.length,
     healthySources,
@@ -171,5 +187,10 @@ export async function GET(_req: NextRequest) {
     staleSources,
     worstSources,
     topSources,
+    registry: {
+      totalConfigured: allSources.length,
+      totalEnabled: enabledSources.length,
+      categoryCoverage: categoryStats,
+    },
   });
 }

@@ -116,7 +116,7 @@ export const researchSources: SourceDefinition[] = [
     category: 'research',
     url: 'https://distill.pub/rss.xml',
     reliability: 9,
-    enabled: true,
+    enabled: false, // Distill.pub discontinued publication in 2021
   },
   {
     id: 'apple_ml_research',
