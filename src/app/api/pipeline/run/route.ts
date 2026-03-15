@@ -48,6 +48,7 @@ import { getRecentEvents }                      from '@/services/storage/eventSt
 import { generateSignalsFromEvents }            from '@/services/signals/signalEngine';
 import { saveSignals, updateSignalInsight, markInsightGenerationError } from '@/services/storage/signalStore';
 import { generateSignalInsightWithMeta }        from '@/lib/intelligence/generateSignalInsight';
+import { corroborateSignals }                    from '@/lib/signals/clusterSignals';
 import { withPipelineLock, pipelineLockedResponse } from '@/lib/pipelineLock';
 import { generatePageSnapshots }               from '@/lib/pipeline/snapshot';
 import { refreshCaches }                        from '@/lib/pipeline/cacheRefresh';
@@ -550,6 +551,24 @@ export async function POST(req: NextRequest) {
             ...intel.result!,
           });
         }
+      }
+
+      // Stage 2c — Signal corroboration clustering — non-blocking
+      // Detects emerging developments when multiple signals reference the same entity.
+      // Runs after signal generation; failures are non-fatal.
+      const clustering = await runStage(
+        'clustering',
+        () => corroborateSignals(),
+        TIMEOUT.SIGNALS,
+        correlationId,
+      );
+      if (clustering.error) {
+        stages.push({ stage: 'clustering', status: 'error', durationMs: clustering.durationMs, error: clustering.error, timedOut: clustering.timedOut });
+      } else {
+        stages.push({
+          stage: 'clustering', status: 'ok', durationMs: clustering.durationMs,
+          clustersDetected: clustering.result!.length,
+        });
       }
 
       // Stage 3 — Snapshot generation
