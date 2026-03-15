@@ -23,7 +23,7 @@ import { saveArticle } from '../storage/articleStore';
 import { saveEvent } from '../storage/eventStore';
 import { classifyArticle } from '../intelligence/classifier';
 import { INTELLIGENCE_SOURCES } from '../../config/intelligenceSources';
-import { getEnabledSources, getHighPrioritySources } from '../../config/sources';
+import { getEnabledSources, getHighPrioritySources } from '../../config/sources/index';
 import type { Event } from '@/types/intelligence';
 import {
   canonicalizeUrl,
@@ -41,9 +41,9 @@ import { detectAndLinkEntities } from '@/lib/entityResolver';
 // ─────────────────────────────────────────────────────────────────────────────
 // Primary source selection
 //
-// Sources are now driven by the structured registry in src/config/sources.ts.
-// All enabled sources are ingested; high-priority sources are fetched first.
-// No hardcoded feed arrays — add/remove sources in the registry only.
+// Sources are driven by the modular registry in src/config/sources/.
+// All enabled sources are ingested; high-priority sources (reliability >= 8)
+// are fetched first. Add/remove sources in the category files only.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Per-source article limit per pipeline run
@@ -91,7 +91,8 @@ export async function ingestRss(): Promise<RssIngestResult> {
   // pipeline times out before reaching the tail of the list.
   const highPriority = getHighPrioritySources();
   const allEnabled = getEnabledSources();
-  const normalPriority = allEnabled.filter((s) => s.priority !== 'high');
+  const highPriorityIds = new Set(highPriority.map((s) => s.id));
+  const normalPriority = allEnabled.filter((s) => !highPriorityIds.has(s.id));
 
   // Map canonical sources to legacy Source shape for rssFetcher compatibility
   const sourceIds = [...highPriority, ...normalPriority].map((s) => s.id);

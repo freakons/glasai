@@ -1,18 +1,18 @@
 /**
  * Omterminal — Intelligence Source Registry (Compatibility Layer)
  *
- * Derives the INTELLIGENCE_SOURCES array from the canonical source registry
- * in sources.ts. This preserves backward compatibility for downstream
+ * Derives the INTELLIGENCE_SOURCES array from the modular source registry
+ * in src/config/sources/. This preserves backward compatibility for downstream
  * consumers (sourceTrust, rssFetcher, classifier) that depend on the legacy
  * SourceCategory taxonomy and reliabilityScore field.
  *
- * The canonical source of truth is now src/config/sources.ts.
+ * The canonical source of truth is now src/config/sources/index.ts.
  */
 
 import {
-  SOURCES,
-  type Source as CanonicalSource,
-  type SourceCategory as CanonicalCategory,
+  allSources,
+  type SourceDefinition,
+  type SourceCategory as NewSourceCategory,
 } from './sources';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,34 +40,26 @@ export interface Source {
 // Category mapping: new canonical → legacy
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CATEGORY_MAP: Record<CanonicalCategory, SourceCategory> = {
-  company: 'model_lab',
-  research: 'research',
-  media: 'industry_analysis',
-  funding: 'venture_capital',
-  policy: 'policy',
-  infrastructure: 'big_tech',
+const CATEGORY_MAP: Record<NewSourceCategory, SourceCategory> = {
+  company:   'model_lab',
+  research:  'research',
+  news:      'industry_analysis',
+  developer: 'big_tech',
+  social:    'industry_analysis',
+  policy:    'policy',
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Priority → reliability score mapping
-// ─────────────────────────────────────────────────────────────────────────────
-
-function priorityToReliability(priority: CanonicalSource['priority']): number {
-  return priority === 'high' ? 9 : 7;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Derived registry
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const INTELLIGENCE_SOURCES: Source[] = SOURCES.map((s) => ({
+export const INTELLIGENCE_SOURCES: Source[] = allSources.map((s: SourceDefinition) => ({
   id: s.id,
   name: s.name,
   category: CATEGORY_MAP[s.category],
-  rss: s.rss,
+  rss: s.url ?? '',
   region: 'US',
-  reliabilityScore: priorityToReliability(s.priority),
+  reliabilityScore: s.reliability,
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
