@@ -123,11 +123,11 @@ async function runPipeline(): Promise<void> {
 
     const events        = await getRecentEvents(500);
     const signals       = generateSignalsFromEvents(events);
-    const signalsSaved  = await saveSignals(signals);
+    const signalsResult = await saveSignals(signals);
 
-    recordPipelineRun(signalsSaved);
+    recordPipelineRun(signalsResult.inserted);
     console.log(
-      `[pipeline] self-heal complete — rssArticles=${rssArticlesNew} gnewsIngested=${ingested} events=${events.length} signals=${signalsSaved}`,
+      `[pipeline] self-heal complete — rssArticles=${rssArticlesNew} gnewsIngested=${ingested} events=${events.length} signalsDetected=${signalsResult.detected} signalsInserted=${signalsResult.inserted} signalsSkipped=${signalsResult.skipped}`,
     );
 
     // ── Context generation stage ───────────────────────────────────────────

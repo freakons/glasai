@@ -207,15 +207,17 @@ export async function GET(req: NextRequest) {
     }
 
     const { events, signals, inserted } = guard.result;
-    logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} generated=${signals.length} inserted=${inserted} ms=${Date.now() - t0}`);
+    logWithRequestId(reqId, 'signals', `engine: mode=${engineMode} events=${events.length} detected=${signals.length} inserted=${inserted.inserted} skipped=${inserted.skipped} ms=${Date.now() - t0}`);
 
     return NextResponse.json(
       {
         ok:               true,
         mode:             engineMode,
         eventsAnalysed:   events.length,
-        signalsGenerated: signals.length,
-        signalsInserted:  inserted,
+        signalsDetected:  inserted.detected,
+        signalsInserted:  inserted.inserted,
+        signalsSkipped:   inserted.skipped,
+        signalsGenerated: inserted.inserted, // backward compat alias
         signals,
         requestId:        reqId,
         timestamp:        new Date().toISOString(),

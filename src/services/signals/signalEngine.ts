@@ -301,6 +301,6 @@ export function generateSignalsFromEvents(
     }
   }
 
-  console.log(`[signalEngine] mode=${mode} multiplier=${multiplier} generated=${signals.length} from ${events.length} events`);
+  console.log(`[signalEngine] mode=${mode} multiplier=${multiplier} detected=${signals.length} from ${events.length} events`);
   return signals;
 }
