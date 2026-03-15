@@ -123,15 +123,24 @@ export async function saveSignal(signal: Signal): Promise<boolean> {
   return rows.length > 0;
 }
 
+export interface SaveSignalsResult {
+  /** Number of signals identified by the engine (input array length). */
+  detected: number;
+  /** Number of new rows inserted into the database. */
+  inserted: number;
+  /** Number of signals skipped because they already existed (detected - inserted). */
+  skipped: number;
+}
+
 /**
  * Persist an array of Signals in parallel, skipping duplicates.
  *
  * Individual failures are caught and logged; they do not abort the batch.
  *
- * @returns Number of newly inserted signals.
+ * @returns SaveSignalsResult with detected, inserted, and skipped counts.
  */
-export async function saveSignals(signals: Signal[]): Promise<number> {
-  if (signals.length === 0) return 0;
+export async function saveSignals(signals: Signal[]): Promise<SaveSignalsResult> {
+  if (signals.length === 0) return { detected: 0, inserted: 0, skipped: 0 };
 
   const results = await Promise.allSettled(signals.map(saveSignal));
 
@@ -143,8 +152,10 @@ export async function saveSignals(signals: Signal[]): Promise<number> {
     }
   }
 
-  console.log(`[signalStore] saveSignals: ${inserted}/${signals.length} inserted.`);
-  return inserted;
+  const detected = signals.length;
+  const skipped = detected - inserted;
+  console.log(`[signalStore] saveSignals: detected=${detected} inserted=${inserted} skipped=${skipped}`);
+  return { detected, inserted, skipped };
 }
 
 /**

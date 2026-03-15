@@ -233,6 +233,10 @@ interface RunRecord {
   articlesInserted: number;
   articlesFetched: number;
   articlesDeduped: number;
+  signalsDetected: number;
+  signalsInserted: number;
+  signalsSkipped: number;
+  /** @deprecated Use signalsInserted. Kept for backward compatibility with pipeline_runs schema. */
   signalsGenerated: number;
   errorsCount: number;
   errorSummary?: string;
@@ -385,7 +389,7 @@ export async function POST(req: NextRequest) {
     const stages: PipelineStageResult[] = [];
     let errorsCount = 0;
     let articlesFetched = 0, articlesInserted = 0, articlesDeduped = 0;
-    let signalsGenerated = 0;
+    let signalsDetected = 0, signalsInserted = 0, signalsSkipped = 0;
 
     const overallTimer = new Promise<never>((_, reject) =>
       setTimeout(
@@ -476,7 +480,7 @@ export async function POST(req: NextRequest) {
           const sigs    = generateSignalsFromEvents(events);
           generatedSigs = sigs;
           const saved   = await saveSignals(sigs);
-          return { eventsLoaded: events.length, signalsSaved: saved };
+          return { eventsLoaded: events.length, ...saved };
         },
         TIMEOUT.SIGNALS,
         correlationId,
@@ -485,10 +489,16 @@ export async function POST(req: NextRequest) {
         stages.push({ stage: 'signals', status: 'error', durationMs: signals.durationMs, error: signals.error, timedOut: signals.timedOut });
         errorsCount++;
       } else {
-        signalsGenerated = signals.result!.signalsSaved;
+        const sr = signals.result!;
+        signalsDetected = sr.detected;
+        signalsInserted = sr.inserted;
+        signalsSkipped  = sr.skipped;
         stages.push({
           stage: 'signals', status: 'ok', durationMs: signals.durationMs,
-          eventsLoaded: signals.result!.eventsLoaded, signalsGenerated,
+          eventsLoaded:     sr.eventsLoaded,
+          signalsDetected,
+          signalsInserted,
+          signalsSkipped,
         });
       }
 
@@ -613,7 +623,7 @@ export async function POST(req: NextRequest) {
       errorsCount++;
     }
 
-    return { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsGenerated };
+    return { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsDetected, signalsInserted, signalsSkipped };
   });
 
   if (guard.locked) {
@@ -622,7 +632,7 @@ export async function POST(req: NextRequest) {
     return pipelineLockedResponse(correlationId, guard);
   }
 
-  const { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsGenerated } = guard.result;
+  const { stages, errorsCount, articlesFetched, articlesInserted, articlesDeduped, signalsDetected, signalsInserted, signalsSkipped } = guard.result;
   const durationMs = Date.now() - t0;
 
   const overallStatus: RunStatus =
@@ -642,7 +652,10 @@ export async function POST(req: NextRequest) {
     articlesFetched,
     articlesInserted,
     articlesDeduped,
-    signalsGenerated,
+    signalsDetected,
+    signalsInserted,
+    signalsSkipped,
+    signalsGenerated: signalsInserted, // backward compat: maps to DB signals_generated column
     errorsCount,
     errorSummary,
   });
@@ -650,7 +663,7 @@ export async function POST(req: NextRequest) {
   logWithRequestId(
     correlationId,
     'pipeline/run',
-    `status=${overallStatus} ingested=${articlesInserted} signals=${signalsGenerated} ms=${durationMs}`,
+    `status=${overallStatus} ingested=${articlesInserted} signalsDetected=${signalsDetected} signalsInserted=${signalsInserted} signalsSkipped=${signalsSkipped} ms=${durationMs}`,
   );
 
   return NextResponse.json(
@@ -669,7 +682,10 @@ export async function POST(req: NextRequest) {
         articlesFetched,
         articlesInserted,
         articlesDeduped,
-        signalsGenerated,
+        signalsDetected,
+        signalsInserted,
+        signalsSkipped,
+        signalsGenerated: signalsInserted, // backward compat alias
         errorsCount,
       },
     },
